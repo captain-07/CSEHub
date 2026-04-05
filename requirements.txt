@@ -1,0 +1,33 @@
+# Core
+Django==6.0.3
+djangorestframework==3.16.0
+
+# Database
+psycopg[binary]==3.3.3
+
+# Environment & Config
+django-environ==0.12.0
+
+# CORS
+django-cors-headers==4.7.0
+
+# Filtering
+django-filter==25.1
+
+# Authentication
+PyJWT==2.10.1
+
+# Media
+cloudinary==1.44.0
+django-cloudinary-storage==0.3.0
+
+# HTTP requests (Piston API)
+requests==2.32.3
+
+# RAG Pipeline
+pinecone-client==5.0.1
+google-generativeai==0.8.4
+
+# Deployment
+gunicorn==23.0.0
+whitenoise==6.9.0
