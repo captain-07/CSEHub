@@ -56,7 +56,7 @@ INSTALLED_APPS = [
     'apps.users',
     'apps.problems',
     'apps.chatbot',
-    'django-filters',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
