@@ -9,8 +9,9 @@ class User(AbstractUser):
     avatar_url = models.URLField(blank=True)
     display_name = models.CharField(max_length=100, blank=True)
 
-    REQUIRED_FIELDS = ['email']
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['username']
 
     def __str__(self):
-        return self.username or self.email
+        return self.email
     

@@ -1,6 +1,5 @@
 from django.core.management.base import BaseCommand
-from apps.articles.models import Category, Tag, Article
-# from apps.problems.models import Problem, TestCase
+from apps.articles.models import Category, Tag, Article, ArticleTag, CodeSnippet
 
 
 class Command(BaseCommand):
@@ -19,40 +18,47 @@ class Command(BaseCommand):
             cats[slug] = c
 
         self.stdout.write('Seeding tags...')
+        tags = {}
         for name in ['array', 'linked-list', 'tree', 'dp', 'graph', 'recursion']:
-            Tag.objects.get_or_create(name=name, slug=name)
+            t, _ = Tag.objects.get_or_create(name=name, slug=name)
+            tags[name] = t
 
         self.stdout.write('Seeding articles...')
-        Article.objects.get_or_create(
+        article, created = Article.objects.get_or_create(
             slug='two-sum-explained',
             defaults={
                 'title': 'Two Sum — Explained',
-                'content': '## Problem Given an array of integers nums and an integer target...',
+                'content': (
+                    '## Problem\n'
+                    'Given an array of integers `nums` and an integer `target`, '
+                    'return indices of the two numbers that add up to target.\n\n'
+                    '## Approach\n'
+                    'Use a hashmap to store complement values as you iterate.\n\n'
+                    '## Complexity\n'
+                    'Time: O(n) | Space: O(n)'
+                ),
                 'category': cats['dsa'],
                 'is_published': True,
             }
         )
+        if created:
+            ArticleTag.objects.get_or_create(article=article, tag=tags['array'])
+            ArticleTag.objects.get_or_create(article=article, tag=tags['dp'])
+            CodeSnippet.objects.get_or_create(
+                article=article,
+                order=1,
+                defaults={
+                    'language': 'python',
+                    'code': (
+                        'def twoSum(nums, target):\n'
+                        '    seen = {}\n'
+                        '    for i, num in enumerate(nums):\n'
+                        '        complement = target - num\n'
+                        '        if complement in seen:\n'
+                        '            return [seen[complement], i]\n'
+                        '        seen[num] = i'
+                    ),
+                }
+            )
 
-        # self.stdout.write('Seeding problems...')
-        # p, _ = Problem.objects.get_or_create(
-        #     slug='two-sum',
-        #     defaults={
-        #         'title': 'Two Sum',
-        #         'description': 'Given an array of integers, return indices of the two numbers that add up to target.',
-        #         'difficulty': 'easy',
-        #         'category': cats['dsa'],
-        #         'is_published': True,
-        #     }
-        # )
-        # TestCase.objects.get_or_create(
-        #     problem=p,
-        #     input='[2,7,11,15]9',
-        #     defaults={'expected_output': '[0,1]', 'is_hidden': False}
-        # )
-        # TestCase.objects.get_or_create(
-        #     problem=p,
-        #     input='[3,2,4]6',
-        #     defaults={'expected_output': '[1,2]', 'is_hidden': True}
-        # )
-
-        # self.stdout.write(self.style.SUCCESS('Done. Seed complete.'))
+        self.stdout.write(self.style.SUCCESS('Seed complete.'))
