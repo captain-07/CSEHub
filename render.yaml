@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: csehub-backend
+    env: python
+    plan: free
+    buildCommand: ./build.sh
+    startCommand: gunicorn core.wsgi:application --chdir backend --bind 0.0.0.0:$PORT
