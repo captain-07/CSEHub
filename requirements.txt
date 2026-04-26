@@ -13,6 +13,7 @@ django-cors-headers==4.7.0
 
 # Filtering
 django-filter==25.1
+drf-spectacular==0.28.0
 
 # Authentication
 PyJWT==2.10.1
