@@ -23,15 +23,15 @@ function showError(error, retry) {
 }
 
 function tagsMarkup(tags = []) {
-  return tags.map((tag) => `<a class="tag" href="#/?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`).join("");
+  return tags.map((tag) => `<a class="tag" href="/?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`).join("");
 }
 
 function articleCard(article) {
-  return `<article class="article-card"><div class="card-meta">${article.category ? `<a href="#/?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>` : "Learning note"}<span>·</span><time datetime="${article.created_at}">${formatDate(article.created_at)}</time></div><h2><a href="#/articles/${article.id}">${escapeHtml(article.title)}</a></h2><div class="tag-list">${tagsMarkup(article.tags)}</div><a class="text-link" href="#/articles/${article.id}">Read article <span aria-hidden="true">→</span></a></article>`;
+  return `<article class="article-card"><div class="card-meta">${article.category ? `<a href="/?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>` : "Learning note"}<span>·</span><time datetime="${article.created_at}">${formatDate(article.created_at)}</time></div><h2><a href="/articles/${article.id}">${escapeHtml(article.title)}</a></h2><div class="tag-list">${tagsMarkup(article.tags)}</div><a class="text-link" href="/articles/${article.id}">Read article <span aria-hidden="true">→</span></a></article>`;
 }
 
 async function renderLibrary() {
-  const query = new URLSearchParams(location.hash.split("?")[1] || "");
+  const query = new URLSearchParams(location.search);
   const filters = {
     search: query.get("search") || "",
     "category__slug": query.get("category") || "",
@@ -50,7 +50,8 @@ async function renderLibrary() {
       const value = values.get(key);
       if (value && !(key === "ordering" && value === "-created_at")) next.set(key, value);
     });
-    location.hash = `/${next.toString() ? `?${next}` : ""}`;
+    history.pushState({}, "", `/${next.toString() ? `?${next}` : ""}`);
+    navigate();
   });
 
   try {
@@ -70,7 +71,7 @@ async function renderLibrary() {
     const page = normalizePage(articleData);
     const content = document.querySelector("#content");
     if (!page.results?.length) {
-      content.innerHTML = `<div class="empty-state"><h2>No articles found</h2><p>Try a different search term or clear a filter.</p><a class="button button-secondary" href="#/">Clear filters</a></div>`;
+      content.innerHTML = `<div class="empty-state"><h2>No articles found</h2><p>Try a different search term or clear a filter.</p><a class="button button-secondary" href="/">Clear filters</a></div>`;
       return;
     }
     const activeFilter = filters.search || filters["category__slug"] || filters["tags__slug"];
@@ -82,11 +83,11 @@ async function renderLibrary() {
 
 function paginationMarkup(page) {
   if (!page.next && !page.previous) return "";
-  const current = Number(new URLSearchParams(location.hash.split("?")[1] || "").get("page") || 1);
+  const current = Number(new URLSearchParams(location.search).get("page") || 1);
   const setPage = (number) => {
-    const params = new URLSearchParams(location.hash.split("?")[1] || "");
+    const params = new URLSearchParams(location.search);
     params.set("page", number);
-    return `#/?${params}`;
+    return `/?${params}`;
   };
   return `<nav class="pagination" aria-label="Article pages">${page.previous ? `<a class="button button-secondary" href="${setPage(current - 1)}">← Newer</a>` : ""}<span>Page ${current}</span>${page.next ? `<a class="button button-secondary" href="${setPage(current + 1)}">Older →</a>` : ""}</nav>`;
 }
@@ -99,11 +100,11 @@ function renderContent(content) {
 }
 
 async function renderArticle(id) {
-  app.innerHTML = `<section class="article-shell"><a class="back-link" href="#/">← Back to articles</a><div class="loading"><span></span>Loading article…</div></section>`;
+  app.innerHTML = `<section class="article-shell"><a class="back-link" href="/">← Back to articles</a><div class="loading"><span></span>Loading article…</div></section>`;
   try {
     const article = await getArticle(id, { signal: pageAbortController.signal });
     const snippets = article.code_snippets?.map((snippet) => `<section class="snippet"><div><span>${escapeHtml(snippet.language)}</span><button class="copy-button" type="button" data-code="${encodeURIComponent(snippet.code)}">Copy code</button></div><pre><code>${escapeHtml(snippet.code)}</code></pre></section>`).join("") || "";
-    app.innerHTML = `<article class="article-shell"><a class="back-link" href="#/">← Back to articles</a><header class="article-header"><div class="card-meta">${article.category ? `<a href="#/?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>` : "Learning note"}<span>·</span><time datetime="${article.created_at}">${formatDate(article.created_at)}</time></div><h1>${escapeHtml(article.title)}</h1><div class="tag-list">${tagsMarkup(article.tags)}</div>${article.author_email ? `<p class="byline">Published by ${escapeHtml(article.author_email)}</p>` : ""}</header><div class="article-content">${renderContent(article.content)}</div>${snippets}</article>`;
+    app.innerHTML = `<article class="article-shell"><a class="back-link" href="/">← Back to articles</a><header class="article-header"><div class="card-meta">${article.category ? `<a href="/?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>` : "Learning note"}<span>·</span><time datetime="${article.created_at}">${formatDate(article.created_at)}</time></div><h1>${escapeHtml(article.title)}</h1><div class="tag-list">${tagsMarkup(article.tags)}</div>${article.author_email ? `<p class="byline">Published by ${escapeHtml(article.author_email)}</p>` : ""}</header><div class="article-content">${renderContent(article.content)}</div>${snippets}</article>`;
     document.querySelectorAll(".copy-button").forEach((button) => button.addEventListener("click", async () => {
       await navigator.clipboard.writeText(decodeURIComponent(button.dataset.code));
       button.textContent = "Copied";
@@ -117,12 +118,20 @@ async function renderArticle(id) {
 function navigate() {
   pageAbortController?.abort();
   pageAbortController = new AbortController();
-  const match = location.hash.match(/^#\/articles\/(\d+)$/);
+  const match = location.pathname.match(/^\/articles\/(\d+)\/?$/);
   if (match) renderArticle(match[1]);
   else renderLibrary();
   app.focus();
 }
 
-window.addEventListener("hashchange", navigate);
-if (!location.hash) location.hash = "/";
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("a[href]");
+  if (!link || event.defaultPrevented || link.target || event.metaKey || event.ctrlKey) return;
+  const url = new URL(link.href, location.origin);
+  if (url.origin !== location.origin || !url.pathname.startsWith("/")) return;
+  event.preventDefault();
+  history.pushState({}, "", `${url.pathname}${url.search}`);
+  navigate();
+});
+window.addEventListener("popstate", navigate);
 navigate();
