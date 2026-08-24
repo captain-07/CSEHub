@@ -11,6 +11,7 @@ cd backend
 python manage.py collectstatic --noinput
 python manage.py migrate --noinput
 python manage.py seed
+python manage.py ingest_articles
 
 # Create superuser only when all required env vars are provided.
 if [[ -n "${DJANGO_SUPERUSER_EMAIL:-}" && -n "${DJANGO_SUPERUSER_USERNAME:-}" && -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
