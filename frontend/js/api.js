@@ -16,7 +16,14 @@ export class ApiError extends Error {
  * Handles network failures, parses JSON responses, and implements consistent error routing.
  */
 export async function apiFetch(endpoint, options = {}) {
-  const url = `${CONFIG.API_BASE_URL.replace(/\/$/, '')}${endpoint}`;
+  let baseUrl = CONFIG.API_BASE_URL.replace(/\/$/, '');
+  
+  // Defensive check: if the user forgot to append "/api" to their domain, auto-append it.
+  if (!baseUrl.endsWith('/api')) {
+    baseUrl += '/api';
+  }
+  
+  const url = `${baseUrl}${endpoint}`;
   
   // Set up default headers
   const headers = new Headers(options.headers || {});
