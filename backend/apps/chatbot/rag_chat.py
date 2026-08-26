@@ -46,4 +46,4 @@ def answer_question(article, question: str, k: int = 4) -> str:
     llm = get_llm()
     response = llm.invoke(prompt)
 
-    return response.content
+    return response.content[0]["text"]

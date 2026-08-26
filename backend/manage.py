@@ -3,6 +3,26 @@
 import os
 import sys
 
+import sys
+import uuid
+from types import ModuleType
+
+# Bypass blocked C-extension by mocking uuid_utils using standard library uuid
+mock_uuid_utils = ModuleType("uuid_utils")
+mock_compat = ModuleType("uuid_utils.compat")
+
+# Standard library uuid4 and uuid7 fallback (or mock uuid7 if on Python < 3.13)
+def uuid7():
+    return uuid.uuid4()  # Standard UUID fallback for LangChain compatibility
+
+mock_uuid_utils.UUID = uuid.UUID
+mock_uuid_utils.uuid7 = uuid7
+mock_compat.uuid7 = uuid7
+mock_uuid_utils.compat = mock_compat
+
+sys.modules["uuid_utils"] = mock_uuid_utils
+sys.modules["uuid_utils.compat"] = mock_compat
+
 
 def main():
     """Run administrative tasks."""
