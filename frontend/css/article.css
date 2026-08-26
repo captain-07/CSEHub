@@ -1,0 +1,156 @@
+/* Article Detail page styling */
+.article-shell {
+  width: min(800px, calc(100% - 4rem));
+  margin: 4rem auto 0;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 2rem;
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 800;
+  transition: color 0.2s ease;
+}
+
+.back-link:hover {
+  color: var(--accent-hover);
+}
+
+.article-header {
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.article-header h1 {
+  margin: 1rem 0 1.25rem;
+  font-size: clamp(2.2rem, 5vw, 3.8rem);
+  line-height: 1.1;
+  letter-spacing: -0.06em;
+}
+
+.byline {
+  margin: 1.1rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.article-content {
+  padding: 2.5rem 0;
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.article-content h2 {
+  margin: 2.5rem 0 0.8rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.04em;
+  line-height: 1.3;
+}
+
+.article-content p {
+  margin: 0 0 1.5rem 0;
+}
+
+.article-content code {
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  background-color: #eef1ed;
+  color: #31583f;
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 0.88em;
+}
+
+/* Code Snippet Blocks */
+.snippet {
+  margin: 2.5rem 0;
+  overflow: hidden;
+  border: 1px solid #26322e;
+  border-radius: 9px;
+  background-color: var(--code-bg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.snippet > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  color: #bccac1;
+  border-bottom: 1px solid #32413a;
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 0.75rem;
+}
+
+.copy-button {
+  padding: 0.25rem 0.5rem;
+  color: #dae7df;
+  background: transparent;
+  border: 1px solid #506157;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.copy-button:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: #dae7df;
+}
+
+.snippet pre {
+  margin: 0;
+  padding: 1.25rem;
+  overflow-x: auto;
+  color: #eaf1ec;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/* Ask AI Section */
+.article-ai-cta {
+  background-color: var(--accent-soft);
+  border: 1px solid rgba(39, 100, 76, 0.15);
+  border-radius: 12px;
+  padding: 2rem;
+  margin: 4rem 0 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.article-ai-cta-content h3 {
+  font-size: 1.25rem;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.4rem;
+  color: var(--accent-hover);
+}
+
+.article-ai-cta-content p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .article-shell {
+    width: calc(100% - 2.5rem);
+    margin-top: 2rem;
+  }
+
+  .article-ai-cta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+    padding: 1.5rem;
+  }
+}

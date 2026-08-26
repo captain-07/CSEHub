@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSEHub — Articles</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/navbar.css" />
+    <link rel="stylesheet" href="css/articles.css" />
+  </head>
+  <body>
+    <header class="site-header"></header>
+
+    <main id="app">
+      <section class="hero container">
+        <p class="eyebrow">CSEHub Learning Library</p>
+        <h1>Learn the ideas<br /><em>behind the code.</em></h1>
+        <p>Explore concise tutorials, explanations, and concepts in practical computer science.</p>
+      </section>
+
+      <section class="library container">
+        <!-- Search and filters panel -->
+        <form class="filters" id="filters">
+          <label class="search-field">
+            <span class="sr-only">Search articles</span>
+            <input name="search" type="search" placeholder="Search articles" />
+          </label>
+          
+          <label>
+            <span class="sr-only">Category</span>
+            <select name="category">
+              <option value="">All categories</option>
+            </select>
+          </label>
+          
+          <label>
+            <span class="sr-only">Tag</span>
+            <select name="tag">
+              <option value="">All topics</option>
+            </select>
+          </label>
+          
+          <label>
+            <span class="sr-only">Sort order</span>
+            <select name="ordering">
+              <option value="-created_at">Newest first</option>
+              <option value="created_at">Oldest first</option>
+            </select>
+          </label>
+          
+          <button class="button button-primary" type="submit">Apply</button>
+        </form>
+
+        <!-- Articles list area -->
+        <div id="content-area">
+          <div class="loading">
+            <span class="loading-spinner"></span>Loading articles…
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <span>CSEHub · Computer science, made clearer.</span>
+        <a href="articles.html">Browse the library</a>
+      </div>
+    </footer>
+
+    <!-- Supabase Client Library CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Load page controllers -->
+    <script type="module" src="js/articles.js"></script>
+  </body>
+</html>

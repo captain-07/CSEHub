@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSEHub — Reading Article</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/navbar.css" />
+    <link rel="stylesheet" href="css/article.css" />
+    <link rel="stylesheet" href="css/chat.css" />
+  </head>
+  <body>
+    <header class="site-header"></header>
+
+    <main id="app">
+      <div class="article-shell" id="article-shell">
+        <a class="back-link" href="articles.html">← Back to articles</a>
+        <div class="loading">
+          <span class="loading-spinner"></span>Loading article…
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <span>CSEHub · Computer science, made clearer.</span>
+        <a href="articles.html">Browse the library</a>
+      </div>
+    </footer>
+
+    <!-- Supabase Client Library CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Load page controllers -->
+    <script type="module" src="js/article.js"></script>
+  </body>
+</html>

@@ -44,10 +44,17 @@ class SupabaseJWTAuthentication(BaseAuthentication):
             if not supabase_uid:
                 raise AuthenticationFailed("Token missing subject")
 
+            email = payload.get("email", "")
+            # Generate a default unique username (e.g. email prefix or UUID snippet if needed)
+            username = email.split("@")[0] if email else str(supabase_uid)
+            if User.objects.filter(username=username).exists():
+                username = f"{username}_{str(supabase_uid)[:8]}"
+
             user, created = User.objects.get_or_create(
                 supabase_uid=supabase_uid,
                 defaults={
-                    "email": payload.get("email", ""),
+                    "email": email,
+                    "username": username,
                 },
             )
 

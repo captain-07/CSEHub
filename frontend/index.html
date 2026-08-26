@@ -3,27 +3,74 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="CSEHub — practical computer science learning notes." />
-    <title>CSEHub</title>
+    <meta name="description" content="CSEHub — Learn Computer Science. Build Strong Foundations." />
+    <title>CSEHub — Home</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/styles.css" />
+    
+    <!-- Link split stylesheet files -->
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/navbar.css" />
+    <link rel="stylesheet" href="css/articles.css" />
   </head>
   <body>
-    <header class="site-header">
-      <a class="brand" href="/" aria-label="CSEHub home"><span class="brand-mark">&lt;/&gt;</span>CSEHub</a>
-      <nav aria-label="Primary navigation"><a href="/">Explore articles</a></nav>
-    </header>
+    <!-- Dynamically loaded header -->
+    <header class="site-header"></header>
 
-    <main id="app" tabindex="-1" aria-live="polite"></main>
+    <main id="app">
+      <section class="hero container">
+        <p class="eyebrow">Practical computer science learning</p>
+        <h1>Learn Computer Science.<br /><em>Build Strong Foundations.</em></h1>
+        <p>Focused explanations, code examples, and an AI-powered assistant to help you master core concepts.</p>
+        
+        <div class="hero-actions">
+          <a class="button button-primary" href="articles.html">Explore Articles</a>
+          <a class="button button-secondary" href="articles.html?search=AI">Ask AI Assistant</a>
+        </div>
+      </section>
+
+      <section class="features-section container">
+        <h2>What CSEHub Offers</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <h3>CS Articles</h3>
+            <p>Clear, production-quality explanations of data structures, algorithms, system designs, and patterns.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Code Examples</h3>
+            <p>Ready-to-use, readable code blocks in python, javascript, and more that you can easily copy and study.</p>
+          </div>
+          <div class="feature-card">
+            <h3>AI Learning Assistant</h3>
+            <p>Stuck on an explanation? Open the AI chatbot on any article to ask questions, request examples, or clear up doubts.</p>
+          </div>
+          <div class="feature-card" style="border-style: dashed; background-color: transparent;">
+            <h3>Coding Problems</h3>
+            <p style="color: var(--text-secondary); font-weight: 600; margin-top: 0.5rem; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em;">Coming Soon</p>
+            <p>Interactive coding exercises with automated test cases and submissions. Launching in the next release!</p>
+          </div>
+        </div>
+      </section>
+    </main>
 
     <footer class="site-footer">
-      <span>CSEHub · Computer science, made clearer.</span>
-      <a href="/">Browse the library</a>
+      <div class="container">
+        <span>CSEHub · Computer science, made clearer.</span>
+        <a href="articles.html">Browse the library</a>
+      </div>
     </footer>
 
-    <script src="js/config.js"></script>
-    <script type="module" src="js/app.js"></script>
+    <!-- Supabase Client Library CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Initialize navbar page load script -->
+    <script type="module">
+      import { initNavbar } from './js/navbar.js';
+      document.addEventListener("DOMContentLoaded", () => {
+        initNavbar();
+      });
+    </script>
   </body>
 </html>
