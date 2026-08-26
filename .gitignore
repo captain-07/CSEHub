@@ -132,4 +132,8 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.temp
-*.txt
+# codebase files
+codebase.txt
+codebase_summary.txt
+codebase_analysis.txt
+codebase.md
