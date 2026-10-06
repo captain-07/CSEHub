@@ -5,7 +5,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from rest_framework.exceptions import AuthenticationFailed
 
 from .authentication import SupabaseJWTAuthentication
-from .models import User
+
 
 
 @override_settings(SUPABASE_URL='https://project.supabase.co')

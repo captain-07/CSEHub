@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from apps.articles.models import Article
-from .models import Conversation, Message
+from .models import Conversation
 from .rag_chat import ChatServiceError, _response_text
 
 

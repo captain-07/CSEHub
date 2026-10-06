@@ -56,7 +56,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.articles',
     'apps.users',
-    'apps.problems',
+    
     'apps.chatbot',
     'django_filters',
     'drf_spectacular',

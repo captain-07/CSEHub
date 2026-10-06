@@ -1,6 +1,6 @@
 # CSEHub
 
-CSEHub is a computer science learning platform: a Django REST API plus a static frontend. It serves educational articles with code snippets, a per-article RAG chatbot, and Supabase-backed user accounts. Coding problems are modeled but not yet exposed as an API.
+CSEHub is a computer science learning platform: a Django REST API plus a static frontend. It serves educational articles with code snippets, a per-article RAG chatbot, and Supabase-backed user accounts.
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python)
 ![Django](https://img.shields.io/badge/django-6.0.3-092E20?logo=django)
@@ -46,7 +46,6 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 - **User profile** — `GET`/`PATCH /api/me/` for display name, username, and avatar
 - **Static frontend** — HTML/CSS/JS client (home, articles, article + chat, login, profile) deployed on Vercel
 - **API documentation** — Auto-generated OpenAPI schema with Swagger UI and ReDoc
-- **Coding problems** — Problem / test case / submission models exist; API and UI are not implemented yet
 
 ---
 
@@ -274,9 +273,6 @@ CSEHub/
 │   │   │   ├── models.py          # Conversation, Message
 │   │   │   ├── urls.py
 │   │   │   └── views.py
-│   │   ├── problems/              # Coding problems (models only)
-│   │   │   ├── models.py          # Problem, TestCase, Submission
-│   │   │   └── views.py           # stub
 │   │   └── users/                 # Custom user + JWT auth
 │   │       ├── authentication.py  # SupabaseJWTAuthentication
 │   │       ├── models.py
@@ -314,7 +310,6 @@ CSEHub/
 | `articles` | Mature      | Full CRUD API, admin, serializers, public read / admin write |
 | `chatbot`  | Implemented | Ask + conversation APIs, ingestion, RAG pipeline             |
 | `users`    | Partial     | Auth, model, and `/api/me/` profile; no user admin API       |
-| `problems` | Models only | Problem / TestCase / Submission defined, no API              |
 
 
 ---
