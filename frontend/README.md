@@ -4,10 +4,14 @@ This is a dependency-free static client for CSEHub's public learning library.
 
 ## Configuration
 
-It calls the project's Render API at `https://csehub-ezdl.onrender.com/api` by default, including when opened with Live Server. To use a local Django API or another deployed backend, set `window.CSEHUB_API_BASE_URL` before `js/config.js` in `index.html`, for example:
+Set public deployment configuration before each page's module script. The API URL may be either the backend origin or its `/api` URL; pagination URLs returned by DRF are handled directly.
 
 ```html
-<script>window.CSEHUB_API_BASE_URL = "https://api.example.com/api";</script>
+<script>
+  window.CSEHUB_API_BASE_URL = "https://api.example.com";
+  window.CSEHUB_SUPABASE_URL = "https://your-project.supabase.co";
+  window.CSEHUB_SUPABASE_ANON_KEY = "your-publishable-anon-key";
+</script>
 ```
 
 The frontend origin must be included in the backend's `CORS_ALLOWED_ORIGINS` setting.

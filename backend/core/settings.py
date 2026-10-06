@@ -24,8 +24,7 @@ AUTH_USER_MODEL = 'users.User'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-SUPABASE_JWT_SECRET = env('SUPABASE_JWT_SECRET')
-SUPABASE_URL = env('SUPABASE_URL')
+SUPABASE_URL = env('SUPABASE_URL', default='')
 
 
 # Quick-start development settings - unsuitable for production
@@ -198,6 +197,9 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
-PINECONE_API_KEY = env('PINECONE_API_KEY')
-PINECONE_INDEX_NAME = env('PINECONE_INDEX_NAME')
-GEMINI_API_KEY = env('GEMINI_API_KEY')
+# RAG is an optional integration at Django startup.  Its commands and chat
+# endpoint provide a controlled error when these are not configured.
+PINECONE_API_KEY = env('PINECONE_API_KEY', default='')
+PINECONE_INDEX_NAME = env('PINECONE_INDEX_NAME', default='')
+GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
+GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-2.5-flash-lite')

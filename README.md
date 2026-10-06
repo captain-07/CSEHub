@@ -46,7 +46,6 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 - **User profile** — `GET`/`PATCH /api/me/` for display name, username, and avatar
 - **Static frontend** — HTML/CSS/JS client (home, articles, article + chat, login, profile) deployed on Vercel
 - **API documentation** — Auto-generated OpenAPI schema with Swagger UI and ReDoc
-- **Cloudinary media** — Optional image and file hosting via Cloudinary CDN
 - **Coding problems** — Problem / test case / submission models exist; API and UI are not implemented yet
 
 ---
@@ -62,7 +61,6 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 | **Database**       | PostgreSQL (via `DATABASE_URL` or `DB_`* vars)   |
 | **Authentication** | Supabase Auth (JWT, ES256)                       |
 | **API Docs**       | drf-spectacular (OpenAPI 3.0, Swagger, ReDoc)    |
-| **Media Storage**  | Cloudinary                                       |
 | **RAG Pipeline**   | LangChain + Pinecone (vector DB) + Google Gemini |
 | **Backend deploy** | Render (Gunicorn + WhiteNoise)                   |
 | **Frontend**       | Static HTML, CSS, and ES modules on Vercel       |
@@ -78,11 +76,10 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12 (pinned for Render in `runtime.txt`)
 - PostgreSQL (local or remote)
 - Supabase project (JWT auth)
-- Pinecone index and Google Gemini API key (required — settings fail at import if missing)
-- Cloudinary account (optional, for media)
+- Pinecone index and Google Gemini API key (required only for ingestion and chatbot use)
 
 
 
@@ -134,12 +131,11 @@ cp backend/.env.example backend/.env
 | `ALLOWED_HOSTS`                                           | No       | Comma-separated hosts (default: `127.0.0.1,localhost`)                                                                                         |
 | `DATABASE_URL`                                            | Yes*     | PostgreSQL connection string (preferred over individual `DB_`* vars)                                                                           |
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | Yes*     | Fallback database variables when `DATABASE_URL` is not set                                                                                     |
-| `SUPABASE_JWT_SECRET`                                     | Yes      | Supabase project JWT secret (required at import time)                                                                                          |
-| `SUPABASE_URL`                                            | Yes      | Supabase project URL (required at import time)                                                                                                 |
-| `PINECONE_API_KEY`                                        | Yes      | Pinecone API key (required at import time)                                                                                                     |
-| `PINECONE_INDEX_NAME`                                     | Yes      | Pinecone index used for article embeddings                                                                                                     |
-| `GEMINI_API_KEY`                                          | Yes      | Google Gemini API key for embeddings and chat                                                                                                  |
-| `CLOUDINARY_*`                                            | No       | Cloudinary credentials (optional, for media uploads)                                                                                           |
+| `SUPABASE_URL`                                            | Auth only | Supabase project URL; ES256 tokens are verified through its public JWKS endpoint                                                              |
+| `PINECONE_API_KEY`                                        | RAG only | Pinecone API key; server secret                                                                                                                |
+| `PINECONE_INDEX_NAME`                                     | RAG only | Pinecone index used for article embeddings                                                                                                     |
+| `GEMINI_API_KEY`                                          | RAG only | Google Gemini API key; server secret                                                                                                           |
+| `GEMINI_MODEL`                                            | No       | Chat model (default: `gemini-2.5-flash-lite`)                                                                                                 |
 | `CORS_ALLOWED_ORIGINS`                                    | No       | Comma-separated frontend origins (default: `http://localhost:3000`)                                                                            |
 | `CSRF_TRUSTED_ORIGINS`                                    | No       | Comma-separated CSRF trusted origins (default: `http://localhost:3000`)                                                                        |
 | `DJANGO_SUPERUSER_*`                                      | No       | Auto-create superuser during `build.sh`                                                                                                        |
@@ -170,7 +166,7 @@ cd backend && python manage.py runserver
 
 ### Frontend
 
-The frontend is a dependency-free static site. It defaults to the production API at `https://csehub-ezdl.onrender.com`.
+The frontend is a dependency-free static site. Configure its public deployment values before its module scripts load; never put backend secrets there.
 
 ```powershell
 python -m http.server 3000 --directory frontend
@@ -178,10 +174,14 @@ python -m http.server 3000 --directory frontend
 
 Then open `http://localhost:3000`. Run Django separately on port 8000.
 
-To point the client at a local API, set `window.CSEHUB_API_BASE_URL` before `js/config.js`:
+For local development, inject these public values before each page's module script:
 
 ```html
-<script>window.CSEHUB_API_BASE_URL = "http://localhost:8000";</script>
+<script>
+  window.CSEHUB_API_BASE_URL = "http://localhost:8000";
+  window.CSEHUB_SUPABASE_URL = "https://your-project.supabase.co";
+  window.CSEHUB_SUPABASE_ANON_KEY = "your-publishable-anon-key";
+</script>
 ```
 
 The frontend origin must be listed in the backend's `CORS_ALLOWED_ORIGINS`.
@@ -234,7 +234,7 @@ This command is idempotent (`get_or_create`) and safe to run multiple times.
 
 ### Article Ingestion
 
-Published articles are chunked, embedded with Gemini, and stored in Pinecone (namespace `articles`). Saving a published article also triggers ingestion via a `post_save` signal.
+Published articles are chunked, embedded with Gemini, and stored in Pinecone (namespace `articles`) by an explicit command. Article saves never call external providers, so editorial work remains available while a provider is down. The command replaces existing deterministic vector IDs and is safe to re-run.
 
 ```bash
 python backend/manage.py ingest_articles
@@ -271,7 +271,6 @@ CSEHub/
 │   │   │   ├── management/commands/ingest_articles.py
 │   │   │   ├── ingestion.py       # Pinecone embeddings
 │   │   │   ├── rag_chat.py        # Gemini grounded answers
-│   │   │   ├── signals.py         # Re-ingest on article save
 │   │   │   ├── models.py          # Conversation, Message
 │   │   │   ├── urls.py
 │   │   │   └── views.py
@@ -361,12 +360,12 @@ CSEHub/
 
 ## Deployment
 
-The backend is configured for Render. The frontend is a static Vercel site (`frontend/vercel.json` enables `cleanUrls`).
+The backend is configured for Render. The frontend is a static Vercel site (`frontend/vercel.json` enables `cleanUrls`). The active frontend uses `article.html?id=<id>` links consistently.
 
 ### Render (Production)
 
 ```bash
-# Full build (install → collectstatic → migrate → seed → ingest)
+# Full build (install → collectstatic → migrate → seed)
 bash build.sh
 
 # Run with Gunicorn (as defined in Procfile)
@@ -384,8 +383,9 @@ gunicorn core.wsgi:application --chdir backend --bind 0.0.0.0:${PORT:-8000}
 3. Collect static files (WhiteNoise)
 4. Apply database migrations
 5. Seed sample data
-6. Ingest published articles into Pinecone
-7. Create superuser (if `DJANGO_SUPERUSER_*` env vars are set)
+6. Create superuser (if `DJANGO_SUPERUSER_*` env vars are set)
+
+Run `python backend/manage.py ingest_articles` separately after setting the RAG variables. A failed ingestion exits non-zero and reports failed article slugs.
 
 
 
@@ -394,12 +394,10 @@ gunicorn core.wsgi:application --chdir backend --bind 0.0.0.0:${PORT:-8000}
 The following environment variables **must** be set in production:
 
 - `SECRET_KEY`
-- `SUPABASE_JWT_SECRET`
 - `SUPABASE_URL`
-- `PINECONE_API_KEY`
-- `PINECONE_INDEX_NAME`
-- `GEMINI_API_KEY`
 - `DATABASE_URL` (Render provides this automatically for Postgres add-ons)
+
+`PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, and `GEMINI_API_KEY` are additionally required only when deploying RAG ingestion/chat.
 
 Also set `CORS_ALLOWED_ORIGINS` (and `CSRF_TRUSTED_ORIGINS` if needed) to the Vercel frontend origin.
 

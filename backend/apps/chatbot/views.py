@@ -6,6 +6,9 @@ from apps.articles.models import Article
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, AskQuestionSerializer
 from .rag_chat import answer_question
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class AskArticleView(APIView):
@@ -23,17 +26,21 @@ class AskArticleView(APIView):
             article=article,
         )
 
+        recent_messages = list(conversation.messages.order_by('-created_at')[:10])
+        history = '\n'.join(
+            f"{message.role}: {message.content}"
+            for message in reversed(recent_messages)
+        )
         Message.objects.create(
             conversation=conversation,
             role='user',
             content=question,
         )
-
         try:
-            answer = answer_question(article, question)
-        except Exception as e:
+            answer = answer_question(article, question, history=history)
+        except Exception:
             answer = "Sorry, I couldn't process that question right now."
-            print(f"[RAG] Chat error: {e}")
+            logger.exception("RAG chat failed for article %s", article.slug)
 
         Message.objects.create(
             conversation=conversation,

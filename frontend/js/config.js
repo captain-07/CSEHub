@@ -1,7 +1,7 @@
 export const CONFIG = {
-  // Use the local backend or fall back to the production API URL
-  API_BASE_URL: window.CSEHUB_API_BASE_URL || "https://csehub-ezdl.onrender.com",
-  SUPABASE_URL: "https://uayvvxmyiuofigddtmxb.supabase.co",
-  // The client-side publishable key for Supabase Auth
-  SUPABASE_ANON_KEY: window.CSEHUB_SUPABASE_ANON_KEY || "sb_publishable_Vzp_KX58h55EzmOi03qKPA_ntUBSyhK"
+  // Configure these in a small, deployment-specific script before modules load.
+  // The Supabase publishable key is public by design; server secrets never belong here.
+  API_BASE_URL: window.CSEHUB_API_BASE_URL || "",
+  SUPABASE_URL: window.CSEHUB_SUPABASE_URL || "",
+  SUPABASE_ANON_KEY: window.CSEHUB_SUPABASE_ANON_KEY || ""
 };

@@ -16,14 +16,7 @@ export class ApiError extends Error {
  * Handles network failures, parses JSON responses, and implements consistent error routing.
  */
 export async function apiFetch(endpoint, options = {}) {
-  let baseUrl = CONFIG.API_BASE_URL.replace(/\/$/, '');
-  
-  // Defensive check: if the user forgot to append "/api" to their domain, auto-append it.
-  if (!baseUrl.endsWith('/api')) {
-    baseUrl += '/api';
-  }
-  
-  const url = `${baseUrl}${endpoint}`;
+  const url = buildApiUrl(endpoint);
   
   // Set up default headers
   const headers = new Headers(options.headers || {});
@@ -82,4 +75,17 @@ export async function apiFetch(endpoint, options = {}) {
   }
 
   return data;
+}
+
+function buildApiUrl(endpoint) {
+  if (/^https?:\/\//i.test(endpoint)) return endpoint;
+  if (!CONFIG.API_BASE_URL) {
+    throw new ApiError("The frontend API URL has not been configured.", 0);
+  }
+  let base = CONFIG.API_BASE_URL.replace(/\/$/, '');
+  if (base.endsWith('/api')) base = base.slice(0, -4);
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const apiBase = base.endsWith('/api') ? base : `${base}/api`;
+  // DRF's pagination can return /api/... paths; never append /api twice.
+  return path === '/api' || path.startsWith('/api/') ? `${base}${path}` : `${apiBase}${path}`;
 }

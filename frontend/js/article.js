@@ -19,7 +19,14 @@ function tagsMarkup(tags = []) {
 }
 
 function renderContent(content = "") {
-  // Simple markdown-to-HTML parser for safe rendering
+  // Editor.js is stored as JSON when used by an editor. Render its supported
+  // blocks explicitly and escape every text field rather than trusting HTML.
+  try {
+    const document = JSON.parse(content);
+    if (Array.isArray(document.blocks)) return document.blocks.map(renderEditorBlock).join("");
+  } catch (_) {
+    // Existing seeded articles use Markdown-like plain text; retain support.
+  }
   return escapeHtml(content)
     .split(/\n{2,}/)
     .map((block) => {
@@ -32,6 +39,39 @@ function renderContent(content = "") {
       return `<p>${block.replace(/`([^`]+)`/g, "<code>$1</code>").replaceAll("\n", "<br />")}</p>`;
     })
     .join("");
+}
+
+function renderEditorBlock(block) {
+  const data = block?.data || {};
+  const text = escapeHtml(data.text || "").replaceAll("\n", "<br />");
+  switch (block?.type) {
+    case "header": {
+      const level = Math.min(4, Math.max(1, Number(data.level) || 2));
+      return `<h${level}>${text}</h${level}>`;
+    }
+    case "list": {
+      const tag = data.style === "ordered" ? "ol" : "ul";
+      const items = Array.isArray(data.items) ? data.items : [];
+      return `<${tag}>${items.map((item) => `<li>${escapeHtml(typeof item === "string" ? item : item?.content || "")}</li>`).join("")}</${tag}>`;
+    }
+    case "code":
+      return `<pre><code>${escapeHtml(data.code || "")}</code></pre>`;
+    case "quote":
+      return `<blockquote>${text}${data.caption ? `<footer>${escapeHtml(data.caption)}</footer>` : ""}</blockquote>`;
+    case "image": {
+      const url = data.file?.url || data.url || "";
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          return `<figure><img src="${escapeHtml(parsed.href)}" alt="${escapeHtml(data.caption || "Article image")}" />${data.caption ? `<figcaption>${escapeHtml(data.caption)}</figcaption>` : ""}</figure>`;
+        }
+      } catch (_) { /* invalid image URL is ignored */ }
+      return "";
+    }
+    case "paragraph":
+    default:
+      return `<p>${text}</p>`;
+  }
 }
 
 async function initArticle() {

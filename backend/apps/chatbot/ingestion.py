@@ -9,6 +9,7 @@ NAMESPACE = "articles"
 
 
 def get_embeddings():
+    _require_rag_settings()
     return GoogleGenerativeAIEmbeddings(
         model="gemini-embedding-001",
         google_api_key=settings.GEMINI_API_KEY,
@@ -17,9 +18,15 @@ def get_embeddings():
 
 
 def get_vectorstore():
+    _require_rag_settings()
     pc = Pinecone(
         api_key=settings.PINECONE_API_KEY
     )
+
+
+def _require_rag_settings():
+    if not all((settings.PINECONE_API_KEY, settings.PINECONE_INDEX_NAME, settings.GEMINI_API_KEY)):
+        raise RuntimeError('Pinecone and Gemini environment variables are required for RAG.')
 
     return PineconeVectorStore(
         index=pc.Index(settings.PINECONE_INDEX_NAME),
@@ -41,6 +48,7 @@ def ingest_article(article) -> int:
         Number of chunks stored.
     """
 
+    _require_rag_settings()
     pc = Pinecone(
         api_key=settings.PINECONE_API_KEY
     )

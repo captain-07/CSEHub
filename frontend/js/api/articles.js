@@ -27,10 +27,7 @@ async function getAllPages(path, options) {
   const results = [...firstPage.results];
   let next = firstPage.next;
   while (next) {
-    // Extract endpoint path from the full URL returned in next
-    const urlObj = new URL(next);
-    const relativePath = urlObj.pathname + urlObj.search;
-    const page = await apiFetch(relativePath, options);
+    const page = await apiFetch(next, options);
     results.push(...page.results);
     next = page.next;
   }
