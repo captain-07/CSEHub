@@ -2,7 +2,7 @@
  * CSEHub admin panel.
  *
  * Authorization: the `is_admin` value used here comes from `GET /api/me/`
- * (see auth-state.js) — never from local storage, a URL flag, or an email
+ * (see auth-state.js) â€” never from local storage, a URL flag, or an email
  * comparison. Hiding the UI is only UX; the API independently enforces
  * `IsAdminUser` on every write.
  *
@@ -27,17 +27,22 @@ import { ApiError } from './api.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, contentToPlainText,
 } from './renderer.js';
+import {
+  resolveEditorTools, assertDocumentIsEditable, UnsupportedBlocksError,
+} from './editor-tools/registry.js';
 
 const app = document.querySelector('#admin-app');
 
 let editor = null;
 let taxonomy = { categories: [], tags: [] };
 
+/** Resolved in renderArticleForm; see editor-tools/registry.js. */
+let toolStatus = { tools: {}, available: new Set(), missing: [] };
+
 /* ------------------------------------------------------------- utilities */
 
 /** Editor.js and its tools attach to `window` via classic script tags. */
 const EDITOR_VERSION = '2.30.8';
-const MISSING_TOOLS = [['ImageTool', 'images']];
 
 function editorToolsAvailable() {
   return typeof window.EditorJS === 'function';
@@ -54,12 +59,27 @@ function destroyEditor() {
   editor = null;
 }
 
-function statusMessage(text, kind = 'info') {
+/**
+ * Renders a status line, optionally as a bulleted list of offending block types.
+ * Items are escaped, so this is safe for the tool names reported by the guard.
+ */
+function statusMessage(text, kind = 'info', items = []) {
   const el = document.querySelector('#admin-status');
   if (!el) return;
   el.className = text ? `alert alert-${kind}` : '';
-  el.textContent = text || '';
+  if (!text) {
+    el.textContent = '';
+    return;
+  }
+  if (items.length) {
+    el.innerHTML = `${escapeHtml(text)}<ul class="admin-status-list">${items
+      .map((item) => `<li><code>${escapeHtml(item)}</code></li>`)
+      .join('')}</ul>`;
+    return;
+  }
+  el.textContent = text;
 }
+
 
 function friendlyError(error) {
   if (error instanceof ApiError) {
@@ -82,7 +102,7 @@ function statCard(label, value) {
   return `<div class="admin-stat"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
-function loadingMarkup(message = 'Loading…') {
+function loadingMarkup(message = 'Loadingâ€¦') {
   return `<div class="loading"><span class="loading-spinner"></span>${escapeHtml(message)}</div>`;
 }
 
@@ -258,7 +278,7 @@ function adminNav(active) {
  * Dashboard statistics.
  *
  * The listing endpoint is paginated, so the totals come from a full scan of the
- * collection rather than from one page of results — a dashboard that reports
+ * collection rather than from one page of results â€” a dashboard that reports
  * "24 articles" when there are 240 is worse than no dashboard.
  */
 async function fetchAllArticles() {
@@ -335,7 +355,7 @@ function dashboardMarkup({ articles, total }) {
     <section class="admin-panel">
       <div class="results-heading">
         <h2>Recent articles</h2>
-        <a class="text-link" href="#/articles">Manage all articles →</a>
+        <a class="text-link" href="#/articles">Manage all articles â†’</a>
       </div>
       <div class="admin-table-wrap">
         <table class="admin-table">
@@ -350,7 +370,7 @@ function dashboardMarkup({ articles, total }) {
 
 async function renderDashboard() {
   const route = currentRoute;
-  app.innerHTML = loadingMarkup('Loading dashboard…');
+  app.innerHTML = loadingMarkup('Loading dashboardâ€¦');
   try {
     await loadTaxonomy();
     const { articles, total } = await fetchAllArticles();
@@ -468,12 +488,12 @@ function articleListMarkup({ page, state, total }) {
       ${total > LIST_PAGE_SIZE ? `
         <nav class="pagination" aria-label="Article pages">
           ${state.page > 1
-            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">← Previous</a>`
-            : '<span class="button button-secondary is-disabled" aria-disabled="true">← Previous</span>'}
-          <span class="pagination-status">Showing ${first}–${last} of ${total}</span>
+            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">â† Previous</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">â† Previous</span>'}
+          <span class="pagination-status">Showing ${first}â€“${last} of ${total}</span>
           ${page.next
-            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next →</a>`
-            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next →</span>'}
+            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next â†’</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next â†’</span>'}
         </nav>` : ''}
     </section>`;
 }
@@ -481,7 +501,7 @@ function articleListMarkup({ page, state, total }) {
 async function renderArticleList() {
   const route = currentRoute;
   const state = listStateFromQuery();
-  app.innerHTML = loadingMarkup('Loading articles…');
+  app.innerHTML = loadingMarkup('Loading articlesâ€¦');
 
   try {
     const filters = { page: state.page, ordering: '-created_at' };
@@ -536,7 +556,7 @@ function taxonomyMarkup() {
     ${adminNav('Categories & tags')}
     <section class="admin-heading">
       <div><p class="eyebrow">CSEHub publishing</p><h1>Categories &amp; Tags</h1></div>
-      <a class="button button-secondary" href="#/">← Back to dashboard</a>
+      <a class="button button-secondary" href="#/">â† Back to dashboard</a>
     </section>
 
     <div class="admin-two-col">
@@ -571,7 +591,7 @@ function taxonomyMarkup() {
 async function renderTaxonomy() {
   const route = currentRoute;
   destroyEditor();
-  app.innerHTML = loadingMarkup('Loading taxonomy…');
+  app.innerHTML = loadingMarkup('Loading taxonomyâ€¦');
   try {
     await loadTaxonomy();
     if (!routeIsCurrent(route)) return;
@@ -644,7 +664,7 @@ function articleFormMarkup(article) {
   const selectedTags = new Set((article?.tags || []).map((tag) => tag.id));
 
   const categoryOptions = [
-    '<option value="">— No category —</option>',
+    '<option value="">â€” No category â€”</option>',
     ...taxonomy.categories.map(
       (category) =>
         `<option value="${category.id}" ${article?.category?.id === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`
@@ -667,7 +687,7 @@ function articleFormMarkup(article) {
         <p class="eyebrow">${article ? 'Editing' : 'New'}</p>
         <h1>${article ? escapeHtml(article.title) : 'Create article'}</h1>
       </div>
-      <a class="button button-secondary" href="#/articles">← All articles</a>
+      <a class="button button-secondary" href="#/articles">â† All articles</a>
     </section>
 
     <form class="admin-form" id="article-form" novalidate>
@@ -691,7 +711,7 @@ function articleFormMarkup(article) {
 
       <div class="field">
         <label for="f-featured-image">Featured image URL</label>
-        <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://…" />
+        <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://â€¦" />
         <span class="field-hint">Link to an externally hosted image. Inline images are uploaded from inside the editor.</span>
       </div>
 
@@ -716,8 +736,8 @@ function articleFormMarkup(article) {
       </div>
 
       <div class="check-row-group">
-        <label class="check-row"><input type="checkbox" name="is_published" ${article?.is_published ? 'checked' : ''} /> <span>Published — visible to everyone</span></label>
-        <label class="check-row"><input type="checkbox" name="is_featured" ${article?.is_featured ? 'checked' : ''} /> <span>Featured — highlighted on the home page</span></label>
+        <label class="check-row"><input type="checkbox" name="is_published" ${article?.is_published ? 'checked' : ''} /> <span>Published â€” visible to everyone</span></label>
+        <label class="check-row"><input type="checkbox" name="is_featured" ${article?.is_featured ? 'checked' : ''} /> <span>Featured â€” highlighted on the home page</span></label>
       </div>
 
       <div class="admin-toolbar">
@@ -729,69 +749,85 @@ function articleFormMarkup(article) {
 }
 
 /**
- * Builds the Editor.js instance.
+ * Builds the Editor.js instance from the registry.
  *
  * The block toolbar mirrors `SUPPORTED_BLOCK_TYPES` in
- * backend/apps/articles/models.py. Adding a block here without adding it there
- * would produce a document the API rejects with a 400. Bold, italic and inline
- * links are internal to Editor.js 2.30 and need no entry here.
+ * backend/apps/articles/models.py â€” see `editor-tools/registry.js`, which holds
+ * the mapping and is verified against the backend allow-list by
+ * `.check-editor-tools.mjs`. Bold, italic and inline links are internal to
+ * Editor.js 2.30 and need no entry.
+ *
+ * Availability is measured rather than assumed: a tool that failed to load is
+ * simply absent from `tools`, and `toolStatus.missing` records it so the form
+ * can block the save instead of quietly losing the block.
  */
-function buildEditor(initialData) {
-  const tools = {};
-
-  if (typeof window.Header === 'function') {
-    tools.header = {
-      class: window.Header,
-      inlineToolbar: true,
-      config: { levels: [2, 3, 4], defaultLevel: 2 },
-    };
-  }
-  if (typeof window.List === 'function') {
-    tools.list = {
-      class: window.List,
-      inlineToolbar: true,
-    };
-  }
-  if (typeof window.Quote === 'function') {
-    tools.quote = {
-      class: window.Quote,
-      inlineToolbar: true,
-    };
-  }
-  if (typeof window.Code === 'function') {
-    tools.code = window.Code;
-  }
-  if (typeof window.Delimiter === 'function') {
-    tools.delimiter = window.Delimiter;
-  }
-  if (typeof window.ImageTool === 'function') {
-    tools.image = {
-      class: window.ImageTool,
-      config: {
-        uploader: {
-          async uploadByFile(file) {
-            const url = await uploadImage(file);
-            return { success: 1, file: { url, name: file.name } };
-          },
-        },
-        field: 'file',
-        inlineToolbar: true,
+function imageToolConfig() {
+  return {
+    field: 'file',
+    inlineToolbar: true,
+    uploader: {
+      async uploadByFile(file) {
+        const url = await uploadImage(file);
+        return { success: 1, file: { url, name: file.name } };
       },
-    };
+    },
+  };
+}
+
+function buildEditor(initialData) {
+  toolStatus = resolveEditorTools({ imageToolConfig: imageToolConfig() });
+
+  if (toolStatus.missing.length) {
+    console.warn(
+      'Editor.js tools unavailable:',
+      toolStatus.missing.map((tool) => `${tool.blockType} (${tool.source}${tool.globalName ? `:${tool.globalName}` : ''})`),
+    );
   }
 
   return new window.EditorJS({
     holder: 'editorjs',
     data: initialData,
-    placeholder: 'Write the lesson…',
-    tools,
+    placeholder: 'Write the lessonâ€¦',
+    tools: toolStatus.tools,
   });
+}
+
+/** Block-type names the panel should warn about, derived from the registry. */
+function missingToolLabels() {
+  return toolStatus.missing.map((tool) => `${tool.label.toLowerCase()} (${tool.globalName || tool.source})`);
+}
+
+/**
+ * Blocks the save button and explains why, when the loaded article contains a
+ * block type the editor cannot represent.
+ *
+ * @returns {string[]} the offending block types, empty when saving is safe.
+ */
+function blockedBlockTypes(article) {
+  try {
+    assertDocumentIsEditable(article?.content, toolStatus.available);
+    return [];
+  } catch (error) {
+    if (error instanceof UnsupportedBlocksError) return error.blockTypes;
+    throw error;
+  }
+}
+
+/** Explains a refused save without touching the article. */
+function reportBlockedSave(blockTypes) {
+  statusMessage(
+    'Cannot save this article safely. The editor has no tool for the block type'
+      + `${blockTypes.length > 1 ? 's' : ''} below, and saving would delete the existing content. `
+      + 'Reload the page; if this persists the tool failed to load.',
+    'error',
+    blockTypes,
+  );
 }
 
 async function renderArticleForm(id) {
   const route = currentRoute;
   destroyEditor();
-  app.innerHTML = loadingMarkup(id ? 'Loading article…' : 'Preparing editor…');
+  app.innerHTML = loadingMarkup(id ? 'Loading articleâ€¦' : 'Preparing editorâ€¦');
   statusMessage('');
 
   try {
@@ -811,16 +847,26 @@ async function renderArticleForm(id) {
       return;
     }
 
-    const missing = MISSING_TOOLS.filter(([name]) => typeof window[name] !== 'function');
-    if (missing.length) {
+    editor = buildEditor(article?.content || { time: Date.now(), blocks: [], version: EDITOR_VERSION });
+
+    // Fail before the editor is even usable: a stub block cannot be edited, and
+    // this is the only place that can say so unambiguously.
+    const blocked = blockedBlockTypes(article);
+    if (blocked.length) {
+      document.querySelector('#save-btn').disabled = true;
+      document.querySelector('#preview-btn').disabled = true;
+      reportBlockedSave(blocked);
+      return;
+    }
+
+    if (toolStatus.missing.length) {
       // Non-fatal: the remaining blocks still work, so say exactly what is gone.
       statusMessage(
-        `Editor tools unavailable: ${missing.map(([, label]) => label).join(', ')}. The article can still be written with the remaining blocks.`,
+        `Editor tools unavailable: ${missingToolLabels().join(', ')}. `
+          + 'Blocks of those types cannot be added until the tool loads.',
         'info'
       );
     }
-
-    editor = buildEditor(article?.content || { time: Date.now(), blocks: [], version: EDITOR_VERSION });
 
     document.querySelector('#article-form').addEventListener('submit', (event) => saveArticle(event, article));
     document.querySelector('#preview-btn').addEventListener('click', openPreview);
@@ -832,6 +878,7 @@ async function renderArticleForm(id) {
     app.innerHTML = failureMarkup(friendlyError(error));
   }
 }
+
 
 async function collectPayload() {
   const form = document.querySelector('#article-form');
@@ -858,9 +905,20 @@ async function collectPayload() {
 async function saveArticle(event, article) {
   event.preventDefault();
   const saveBtn = document.querySelector('#save-btn');
-  saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving…';
   statusMessage('');
+
+  // Checked against the *stored* document before anything is read out of the
+  // editor: Editor.js omits blocks whose tool is unregistered, so asking it to
+  // save first would hand us a document with the unsupported blocks already
+  // gone. Bailing out here means no request is sent and the article is untouched.
+  const blocked = blockedBlockTypes(article);
+  if (blocked.length) {
+    reportBlockedSave(blocked);
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Savingâ€¦';
 
   try {
     const payload = await collectPayload();
@@ -898,12 +956,12 @@ async function saveArticle(event, article) {
 async function reindex(article) {
   const btn = document.querySelector('#reindex-btn');
   btn.disabled = true;
-  btn.textContent = 'Indexing…';
-  statusMessage('Sending this article to the vector store…');
+  btn.textContent = 'Indexingâ€¦';
+  statusMessage('Sending this article to the vector storeâ€¦');
 
   try {
     const result = await reindexArticle(article.id);
-    statusMessage(`AI index updated — ${result.chunks} chunks embedded.`, 'success');
+    statusMessage(`AI index updated â€” ${result.chunks} chunks embedded.`, 'success');
   } catch (error) {
     await notify('AI indexing failed', friendlyError(error), 'error');
   } finally {
@@ -928,7 +986,7 @@ function openPreview() {
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preview-title">
           <header class="modal-head">
             <div>
-              <p class="eyebrow">Preview — not yet saved</p>
+              <p class="eyebrow">Preview â€” not yet saved</p>
               <h2 id="preview-title">${escapeHtml(payload.title || 'Untitled')}</h2>
             </div>
             <button class="button button-secondary" type="button" data-close>Close</button>
@@ -965,7 +1023,7 @@ function openPreview() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   initNavbar();
-  app.innerHTML = loadingMarkup('Verifying access…');
+  app.innerHTML = loadingMarkup('Verifying accessâ€¦');
 
   if (!(await guard())) return;
 

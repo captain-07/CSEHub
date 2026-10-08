@@ -204,6 +204,109 @@
   max-width: none;
 }
 
+/* --- Custom block tools (js/editor-tools) ---------------------------------
+   The code block deliberately mirrors the dark reading palette in article.css
+   so what an author types looks like the published snippet. */
+
+.cdx-code {
+  border: 1px solid #26322e;
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.cdx-code__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid #32413a;
+}
+
+.cdx-code__label {
+  color: #bccac1;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cdx-code__select {
+  padding: 0.15rem 0.4rem;
+  color: #dae7df;
+  background: #22302b;
+  border: 1px solid #506157;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.cdx-code__select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cdx-code__textarea {
+  display: block;
+  width: 100%;
+  padding: var(--space-xs);
+  border: 0;
+  background: transparent;
+  color: #eaf1ec;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  /* No soft wrapping: long lines scroll instead of being silently re-flowed. */
+  white-space: pre;
+  overflow-x: auto;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.cdx-code__textarea:focus {
+  outline: none;
+}
+
+.cdx-link {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.cdx-link__field {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.cdx-link__label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cdx-link__input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.cdx-link__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
 /* --- Taxonomy -------------------------------------------------------- */
 
 .admin-two-col {
@@ -325,6 +428,17 @@
 
 #admin-status:empty {
   display: none;
+}
+
+/* The refused-save message lists the offending block types. */
+.admin-status-list {
+  margin: var(--space-3xs) 0 0;
+  padding-left: 1.25rem;
+}
+
+.admin-status-list code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 @media (max-width: 900px) {

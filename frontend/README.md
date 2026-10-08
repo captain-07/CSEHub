@@ -49,6 +49,30 @@ One implementation per concern:
 | Article rendering| `js/renderer.js`                              |
 | Navbar           | `js/navbar.js`                                |
 | Admin panel      | `js/admin.js` (hash-routed)                   |
+| Editor tools     | `js/editor-tools/registry.js` (+ `code-block`, `list-block`, `link-block`) |
+
+### Editor tools and save safety
+
+`js/editor-tools/registry.js` is the single source of truth for which block types
+the admin editor can edit. Tool availability is measured, not declared: a CDN
+script that fails to load or renames its export makes that block type
+*unavailable*, and the registry reports it.
+
+That matters because Editor.js silently drops blocks whose tool is missing when
+it saves — it renders them as `ce-stub` placeholders and then omits them from the
+saved document. Before saving an existing article the panel compares the block
+types in the stored document against the tools that actually loaded; if any
+cannot be represented it refuses the save, names the block types, and leaves the
+article untouched.
+
+Two block types are local tools rather than CDN packages:
+
+* **code** — `@editorjs/code` saves only `{code}` and drops the stored
+  `language` that `js/renderer.js` and the API both rely on.
+* **list** — neither `@editorjs/list` release reads the stored item shape
+  `items: [{ content }]`. list 2.x throws while rendering it; list 1.x renders
+  and re-saves it as `[object Object]`. `js/editor-tools/list-block.js` adapts
+  list 1.x at the boundary so the stored schema is unchanged.
 
 ### XSS
 

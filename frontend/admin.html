@@ -39,17 +39,33 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
 
-    <!-- Editor.js and its tools are loaded as classic scripts so they attach to window.
+    <!-- Editor.js and its CDN tools are loaded as classic scripts so they attach to window.
          Bold / italic / inline-link are internal to Editor.js 2.30 and need no script.
-         Each block tool here has a matching entry in SUPPORTED_BLOCK_TYPES
-         (backend/apps/articles/models.py) and in the toolbar config in js/admin.js. -->
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@2.30.8"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/header@2.8.8"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/list@2.0.8"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@2.6.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/code@2.9.3"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@1.4.0"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@editorjs/image@2.9.3"></script>
+
+         The UMD dist files are named explicitly rather than relying on each package's
+         entrypoint, because the exported global is not always the package name and the
+         registry in js/editor-tools/registry.js depends on knowing it:
+           @editorjs/code -> window.CodeTool   (deliberately NOT loaded; see below)
+           @editorjs/list -> window.List
+         A CDN file that 404s or changes its export name makes a tool unavailable, and
+         that is now reported instead of silently skipped.
+
+         @editorjs/list is held at 1.10.0 and wrapped by js/editor-tools/list-block.js:
+         neither list release reads the stored item shape `items: [{ content }]`. list
+         2.x throws while rendering it (the block degrades to a stub) and list 1.x
+         renders it as [object Object] and rewrites it that way on save. The adapter
+         keeps the schema and reuses list 1.x's editor.
+
+         Every CDN block type has a matching entry in SUPPORTED_BLOCK_TYPES
+         (backend/apps/articles/models.py) and in the registry. The code block is a
+         local tool (js/editor-tools/code-block.js) because @editorjs/code saves only
+         {code} and drops the stored language. -->
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@2.30.8/dist/editorjs.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/header@2.8.8/dist/header.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/list@1.10.0/dist/list.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@2.6.0/dist/quote.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@1.4.0/dist/delimiter.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/image@2.9.3/dist/image.umd.js"></script>
 
     <script type="module" src="js/admin.js"></script>
   </body>
