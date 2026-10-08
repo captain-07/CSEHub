@@ -3,7 +3,7 @@
  *
  * The seeded articles contain `linkTool` blocks (`{ url, text }`, which is what
  * `renderer.js#renderLinkBlock` and the backend block-type fixture expect), but
- * no tool was ever registered for them â€” so they loaded as `ce-stub`
+ * no tool was ever registered for them — so they loaded as `ce-stub`
  * placeholders and would have been dropped from the document on save.
  *
  * Keeping it here rather than adding another CDN dependency means every block

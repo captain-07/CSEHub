@@ -23,7 +23,7 @@ import { LinkBlockTool } from './link-block.js';
 import { ListBlockTool } from './list-block.js';
 
 /**
- * Mirrors SUPPORTED_BLOCK_TYPES in backend/apps/articles/models.py â€” the
+ * Mirrors SUPPORTED_BLOCK_TYPES in backend/apps/articles/models.py — the
  * allow-list the API enforces. `.check-editor-tools.mjs` fails if the two drift.
  */
 export const SUPPORTED_BLOCK_TYPES = Object.freeze([

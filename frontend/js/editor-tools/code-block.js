@@ -5,7 +5,7 @@
  *
  * 1. That package exports the global `CodeTool`, not `Code`, so the old
  *    `typeof window.Code === 'function'` check silently skipped it and code
- *    blocks degraded to `ce-stub` placeholders â€” see `registry.js`.
+ *    blocks degraded to `ce-stub` placeholders — see `registry.js`.
  * 2. Even when loaded, it saves only `{ code }`. The stored schema has always
  *    been `{ code, language }` (see `ArticleWriteSerializer`, the block-type
  *    round-trip test in `apps/articles/tests.py`, and `renderer.js`, which
@@ -61,7 +61,7 @@ export function normalizeCodeBlockData(data) {
  *
  * A language written before this tool existed (or one this build does not list)
  * is appended rather than dropped, so selecting another language and saving is
- * the only way it changes â€” never merely opening the article.
+ * the only way it changes — never merely opening the article.
  */
 export function codeLanguageOptions(current) {
   const options = CODE_LANGUAGES.map((option) => ({ ...option }));

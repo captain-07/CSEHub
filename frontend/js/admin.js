@@ -2,7 +2,7 @@
  * CSEHub admin panel.
  *
  * Authorization: the `is_admin` value used here comes from `GET /api/me/`
- * (see auth-state.js) â€” never from local storage, a URL flag, or an email
+ * (see auth-state.js) — never from local storage, a URL flag, or an email
  * comparison. Hiding the UI is only UX; the API independently enforces
  * `IsAdminUser` on every write.
  *
@@ -102,7 +102,7 @@ function statCard(label, value) {
   return `<div class="admin-stat"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
 }
 
-function loadingMarkup(message = 'Loadingâ€¦') {
+function loadingMarkup(message = 'Loading…') {
   return `<div class="loading"><span class="loading-spinner"></span>${escapeHtml(message)}</div>`;
 }
 
@@ -278,7 +278,7 @@ function adminNav(active) {
  * Dashboard statistics.
  *
  * The listing endpoint is paginated, so the totals come from a full scan of the
- * collection rather than from one page of results â€” a dashboard that reports
+ * collection rather than from one page of results — a dashboard that reports
  * "24 articles" when there are 240 is worse than no dashboard.
  */
 async function fetchAllArticles() {
@@ -355,7 +355,7 @@ function dashboardMarkup({ articles, total }) {
     <section class="admin-panel">
       <div class="results-heading">
         <h2>Recent articles</h2>
-        <a class="text-link" href="#/articles">Manage all articles â†’</a>
+        <a class="text-link" href="#/articles">Manage all articles →</a>
       </div>
       <div class="admin-table-wrap">
         <table class="admin-table">
@@ -370,7 +370,7 @@ function dashboardMarkup({ articles, total }) {
 
 async function renderDashboard() {
   const route = currentRoute;
-  app.innerHTML = loadingMarkup('Loading dashboardâ€¦');
+  app.innerHTML = loadingMarkup('Loading dashboard…');
   try {
     await loadTaxonomy();
     const { articles, total } = await fetchAllArticles();
@@ -488,12 +488,12 @@ function articleListMarkup({ page, state, total }) {
       ${total > LIST_PAGE_SIZE ? `
         <nav class="pagination" aria-label="Article pages">
           ${state.page > 1
-            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">â† Previous</a>`
-            : '<span class="button button-secondary is-disabled" aria-disabled="true">â† Previous</span>'}
-          <span class="pagination-status">Showing ${first}â€“${last} of ${total}</span>
+            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">← Previous</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">← Previous</span>'}
+          <span class="pagination-status">Showing ${first}–${last} of ${total}</span>
           ${page.next
-            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next â†’</a>`
-            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next â†’</span>'}
+            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next →</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next →</span>'}
         </nav>` : ''}
     </section>`;
 }
@@ -501,7 +501,7 @@ function articleListMarkup({ page, state, total }) {
 async function renderArticleList() {
   const route = currentRoute;
   const state = listStateFromQuery();
-  app.innerHTML = loadingMarkup('Loading articlesâ€¦');
+  app.innerHTML = loadingMarkup('Loading articles…');
 
   try {
     const filters = { page: state.page, ordering: '-created_at' };
@@ -556,7 +556,7 @@ function taxonomyMarkup() {
     ${adminNav('Categories & tags')}
     <section class="admin-heading">
       <div><p class="eyebrow">CSEHub publishing</p><h1>Categories &amp; Tags</h1></div>
-      <a class="button button-secondary" href="#/">â† Back to dashboard</a>
+      <a class="button button-secondary" href="#/">← Back to dashboard</a>
     </section>
 
     <div class="admin-two-col">
@@ -591,7 +591,7 @@ function taxonomyMarkup() {
 async function renderTaxonomy() {
   const route = currentRoute;
   destroyEditor();
-  app.innerHTML = loadingMarkup('Loading taxonomyâ€¦');
+  app.innerHTML = loadingMarkup('Loading taxonomy…');
   try {
     await loadTaxonomy();
     if (!routeIsCurrent(route)) return;
@@ -664,7 +664,7 @@ function articleFormMarkup(article) {
   const selectedTags = new Set((article?.tags || []).map((tag) => tag.id));
 
   const categoryOptions = [
-    '<option value="">â€” No category â€”</option>',
+    '<option value="">— No category —</option>',
     ...taxonomy.categories.map(
       (category) =>
         `<option value="${category.id}" ${article?.category?.id === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`
@@ -687,7 +687,7 @@ function articleFormMarkup(article) {
         <p class="eyebrow">${article ? 'Editing' : 'New'}</p>
         <h1>${article ? escapeHtml(article.title) : 'Create article'}</h1>
       </div>
-      <a class="button button-secondary" href="#/articles">â† All articles</a>
+      <a class="button button-secondary" href="#/articles">← All articles</a>
     </section>
 
     <form class="admin-form" id="article-form" novalidate>
@@ -711,7 +711,7 @@ function articleFormMarkup(article) {
 
       <div class="field">
         <label for="f-featured-image">Featured image URL</label>
-        <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://â€¦" />
+        <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://…" />
         <span class="field-hint">Link to an externally hosted image. Inline images are uploaded from inside the editor.</span>
       </div>
 
@@ -736,8 +736,8 @@ function articleFormMarkup(article) {
       </div>
 
       <div class="check-row-group">
-        <label class="check-row"><input type="checkbox" name="is_published" ${article?.is_published ? 'checked' : ''} /> <span>Published â€” visible to everyone</span></label>
-        <label class="check-row"><input type="checkbox" name="is_featured" ${article?.is_featured ? 'checked' : ''} /> <span>Featured â€” highlighted on the home page</span></label>
+        <label class="check-row"><input type="checkbox" name="is_published" ${article?.is_published ? 'checked' : ''} /> <span>Published — visible to everyone</span></label>
+        <label class="check-row"><input type="checkbox" name="is_featured" ${article?.is_featured ? 'checked' : ''} /> <span>Featured — highlighted on the home page</span></label>
       </div>
 
       <div class="admin-toolbar">
@@ -752,7 +752,7 @@ function articleFormMarkup(article) {
  * Builds the Editor.js instance from the registry.
  *
  * The block toolbar mirrors `SUPPORTED_BLOCK_TYPES` in
- * backend/apps/articles/models.py â€” see `editor-tools/registry.js`, which holds
+ * backend/apps/articles/models.py — see `editor-tools/registry.js`, which holds
  * the mapping and is verified against the backend allow-list by
  * `.check-editor-tools.mjs`. Bold, italic and inline links are internal to
  * Editor.js 2.30 and need no entry.
@@ -787,7 +787,7 @@ function buildEditor(initialData) {
   return new window.EditorJS({
     holder: 'editorjs',
     data: initialData,
-    placeholder: 'Write the lessonâ€¦',
+    placeholder: 'Write the lesson…',
     tools: toolStatus.tools,
   });
 }
@@ -827,7 +827,7 @@ function reportBlockedSave(blockTypes) {
 async function renderArticleForm(id) {
   const route = currentRoute;
   destroyEditor();
-  app.innerHTML = loadingMarkup(id ? 'Loading articleâ€¦' : 'Preparing editorâ€¦');
+  app.innerHTML = loadingMarkup(id ? 'Loading article…' : 'Preparing editor…');
   statusMessage('');
 
   try {
@@ -918,7 +918,7 @@ async function saveArticle(event, article) {
   }
 
   saveBtn.disabled = true;
-  saveBtn.textContent = 'Savingâ€¦';
+  saveBtn.textContent = 'Saving…';
 
   try {
     const payload = await collectPayload();
@@ -956,12 +956,12 @@ async function saveArticle(event, article) {
 async function reindex(article) {
   const btn = document.querySelector('#reindex-btn');
   btn.disabled = true;
-  btn.textContent = 'Indexingâ€¦';
-  statusMessage('Sending this article to the vector storeâ€¦');
+  btn.textContent = 'Indexing…';
+  statusMessage('Sending this article to the vector store…');
 
   try {
     const result = await reindexArticle(article.id);
-    statusMessage(`AI index updated â€” ${result.chunks} chunks embedded.`, 'success');
+    statusMessage(`AI index updated — ${result.chunks} chunks embedded.`, 'success');
   } catch (error) {
     await notify('AI indexing failed', friendlyError(error), 'error');
   } finally {
@@ -986,7 +986,7 @@ function openPreview() {
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preview-title">
           <header class="modal-head">
             <div>
-              <p class="eyebrow">Preview â€” not yet saved</p>
+              <p class="eyebrow">Preview — not yet saved</p>
               <h2 id="preview-title">${escapeHtml(payload.title || 'Untitled')}</h2>
             </div>
             <button class="button button-secondary" type="button" data-close>Close</button>
@@ -1023,7 +1023,7 @@ function openPreview() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   initNavbar();
-  app.innerHTML = loadingMarkup('Verifying accessâ€¦');
+  app.innerHTML = loadingMarkup('Verifying access…');
 
   if (!(await guard())) return;
 

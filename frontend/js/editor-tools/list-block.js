@@ -9,15 +9,15 @@
  *     throws `Cannot read properties of undefined (reading 'length')` while
  *     rendering, and Editor.js degrades the block to a `ce-stub`.
  *   * list 1.x expects the older `items: string[]`. It renders our objects as
- *     `[object Object]` and rewrites them that way on save â€” silent corruption.
+ *     `[object Object]` and rewrites them that way on save — silent corruption.
  *
  * So the stored schema is kept (the API allow-list, `renderer.js` and the
  * existing articles all depend on it) and list 1.x is adapted at the boundary:
  * items are flattened to strings on load and rebuilt as `{ content }` objects on
  * save. The mature list editor is reused rather than reimplemented.
  *
- * Anything else on the block â€” `style`, and per-item keys such as a nested
- * `items` array â€” is carried through untouched.
+ * Anything else on the block — `style`, and per-item keys such as a nested
+ * `items` array — is carried through untouched.
  */
 
 /** Editor.js expects `{ content }` objects; returns the text of one item. */

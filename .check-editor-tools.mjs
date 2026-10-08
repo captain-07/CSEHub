@@ -11,7 +11,7 @@
  *      `[object Object]` and rewrites it that way on save. The registry pins the
  *      global so the version and the expectation cannot drift apart.
  *
- * Dependency-free Node, like .check-imports.mjs and .check-assets.mjs â€” these
+ * Dependency-free Node, like .check-imports.mjs and .check-assets.mjs — these
  * modules touch no DOM at import time precisely so this can run.
  *
  * Run: node .check-editor-tools.mjs
@@ -54,7 +54,7 @@ function check(label, condition, detail = '') {
     console.log(`  ok    ${label}`);
   } else {
     failures += 1;
-    console.log(`  FAIL  ${label}${detail ? ` â€” ${detail}` : ''}`);
+    console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`);
   }
 }
 
