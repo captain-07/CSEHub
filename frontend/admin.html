@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="description" content="CSEHub publishing dashboard." />
+    <title>CSEHub — Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/navbar.css" />
+    <!-- articles.css supplies the shared .eyebrow / .empty-state / .results-heading -->
+    <link rel="stylesheet" href="css/articles.css" />
+    <link rel="stylesheet" href="css/article.css" />
+    <link rel="stylesheet" href="css/admin.css" />
+  </head>
+
+  <body>
+    <header class="site-header"></header>
+
+    <!-- Status messages (save/publish/index results) live outside #admin-app:
+         every admin view replaces that element's contents wholesale. -->
+    <div id="admin-status" role="status" aria-live="polite"></div>
+
+    <main class="container admin-shell" id="admin-app">
+      <div class="loading"><span class="loading-spinner"></span>Verifying access…</div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <span>CSEHub · Computer science, made clearer.</span>
+        <a href="index.html">Back to the site</a>
+      </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
+
+    <!-- Editor.js and its tools are loaded as classic scripts so they attach to window.
+         Bold / italic / inline-link are internal to Editor.js 2.30 and need no script.
+         Each block tool here has a matching entry in SUPPORTED_BLOCK_TYPES
+         (backend/apps/articles/models.py) and in the toolbar config in js/admin.js. -->
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@2.30.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/header@2.8.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/list@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@2.6.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/code@2.9.3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@1.4.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@editorjs/image@2.9.3"></script>
+
+    <script type="module" src="js/admin.js"></script>
+  </body>
+</html>

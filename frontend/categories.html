@@ -3,38 +3,48 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CSEHub — Profile Settings</title>
+    <meta name="description" content="Browse CSEHub lessons by computer science subject and tag." />
+    <title>CSEHub — Categories</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    
+
     <link rel="stylesheet" href="css/reset.css" />
     <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="css/navbar.css" />
-    <link rel="stylesheet" href="css/profile.css" />
+    <link rel="stylesheet" href="css/articles.css" />
   </head>
+
   <body>
     <header class="site-header"></header>
 
     <main id="app">
-      <div class="profile-wrapper container" id="profile-container">
-        <div class="loading">
-          <span class="loading-spinner"></span>Loading profile…
+      <section class="hero hero-compact container">
+        <p class="eyebrow">Browse the library</p>
+        <h1>Learn by subject</h1>
+        <p>Pick a computer science topic to see the lessons written for it.</p>
+      </section>
+
+      <section class="features-section container">
+        <div class="category-grid" id="category-grid">
+          <div class="loading"><span class="loading-spinner"></span>Loading categories…</div>
         </div>
-      </div>
+      </section>
+
+      <section class="features-section container" id="tags-section">
+        <h2>Or filter by tag</h2>
+        <div class="tag-list" id="tag-cloud"></div>
+      </section>
     </main>
 
     <footer class="site-footer">
       <div class="container">
         <span>CSEHub · Computer science, made clearer.</span>
-        <a href="articles.html">Browse the library</a>
+        <a href="articles.html">Browse all articles</a>
       </div>
     </footer>
 
-    <!-- Supabase Client Library CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
-    
-    <!-- Load page controllers -->
-    <script type="module" src="js/profile.js"></script>
+    <script type="module" src="js/categories.js"></script>
   </body>
 </html>

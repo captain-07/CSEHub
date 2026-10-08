@@ -1,187 +1,193 @@
-import { getArticle } from './api/articles.js';
+import { getArticle, getArticles } from './api/articles.js';
 import { ApiError } from './api.js';
 import { initNavbar } from './navbar.js';
 import { openChatForArticle } from './chat.js';
-
-const escapeHtml = (value = "") => String(value)
-  .replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;")
-  .replaceAll(">", "&gt;")
-  .replaceAll('"', "&quot;")
-  .replaceAll("'", "&#039;");
-
-function formatDate(value) {
-  return new Intl.DateTimeFormat("en", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value));
-}
+import {
+  renderArticleContent, escapeHtml, safeUrl, formatDate, readingTime, contentToPlainText,
+} from './renderer.js';
 
 function tagsMarkup(tags = []) {
-  return tags.map((tag) => `<a class="tag" href="articles.html?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`).join("");
+  return tags
+    .map((tag) => `<a class="tag" href="articles.html?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`)
+    .join('');
 }
 
-function renderContent(content = "") {
-  // Editor.js is stored as JSON when used by an editor. Render its supported
-  // blocks explicitly and escape every text field rather than trusting HTML.
+function snippetMarkup(snippets = []) {
+  return snippets
+    .map((snippet) => `
+      <section class="snippet">
+        <div class="snippet-bar">
+          <span class="snippet-lang">${escapeHtml(snippet.language || 'code')}</span>
+          <button class="copy-button" type="button" data-code="${encodeURIComponent(snippet.code || '')}">Copy code</button>
+        </div>
+        <pre><code>${escapeHtml(snippet.code)}</code></pre>
+      </section>`)
+    .join('');
+}
+
+/** Sibling articles in the same category, used for the "keep learning" rail. */
+async function loadRelated(article) {
+  if (!article?.category?.slug) return [];
   try {
-    const document = JSON.parse(content);
-    if (Array.isArray(document.blocks)) return document.blocks.map(renderEditorBlock).join("");
-  } catch (_) {
-    // Existing seeded articles use Markdown-like plain text; retain support.
+    // The filterset field is `category__slug`, so that is the query parameter
+    // the backend expects — not `category`.
+    const page = await getArticles({ category__slug: article.category.slug, page: 1 });
+    const results = Array.isArray(page) ? page : page?.results || [];
+    return results.filter((item) => item.id !== article.id).slice(0, 3);
+  } catch {
+    return [];
   }
-  return escapeHtml(content)
-    .split(/\n{2,}/)
-    .map((block) => {
-      if (block.startsWith("## ")) {
-        return `<h2>${block.slice(3)}</h2>`;
-      }
-      if (block.startsWith("# ")) {
-        return `<h1>${block.slice(2)}</h1>`;
-      }
-      return `<p>${block.replace(/`([^`]+)`/g, "<code>$1</code>").replaceAll("\n", "<br />")}</p>`;
-    })
-    .join("");
 }
 
-function renderEditorBlock(block) {
-  const data = block?.data || {};
-  const text = escapeHtml(data.text || "").replaceAll("\n", "<br />");
-  switch (block?.type) {
-    case "header": {
-      const level = Math.min(4, Math.max(1, Number(data.level) || 2));
-      return `<h${level}>${text}</h${level}>`;
-    }
-    case "list": {
-      const tag = data.style === "ordered" ? "ol" : "ul";
-      const items = Array.isArray(data.items) ? data.items : [];
-      return `<${tag}>${items.map((item) => `<li>${escapeHtml(typeof item === "string" ? item : item?.content || "")}</li>`).join("")}</${tag}>`;
-    }
-    case "code":
-      return `<pre><code>${escapeHtml(data.code || "")}</code></pre>`;
-    case "quote":
-      return `<blockquote>${text}${data.caption ? `<footer>${escapeHtml(data.caption)}</footer>` : ""}</blockquote>`;
-    case "image": {
-      const url = data.file?.url || data.url || "";
+/** Keeps the tab title, description and social preview in step with the article. */
+function applyDocumentMeta(article) {
+  const title = `${article.title} — CSEHub`;
+  document.title = title;
+
+  const setMeta = (selector, value) => {
+    const tag = document.querySelector(selector);
+    if (tag && value) tag.setAttribute('content', value);
+  };
+
+  setMeta('meta[name="description"]', article.excerpt || contentToPlainText(article.content, 160));
+  setMeta('meta[property="og:title"]', title);
+  setMeta('meta[property="og:type"]', 'article');
+  setMeta('meta[property="og:description"]', article.excerpt || contentToPlainText(article.content, 160));
+  if (safeUrl(article.featured_image)) setMeta('meta[property="og:image"]', article.featured_image);
+}
+
+function relatedMarkup(related) {
+  if (!related.length) return '';
+  return `
+    <section class="article-related">
+      <h2 class="article-related-title">Keep learning</h2>
+      <div class="article-related-grid">
+        ${related
+          .map(
+            (item) => `
+          <a class="article-related-card" href="article.html?slug=${encodeURIComponent(item.slug || item.id)}">
+            <h3>${escapeHtml(item.title)}</h3>
+            ${item.excerpt ? `<p>${escapeHtml(item.excerpt)}</p>` : ''}
+            <span class="card-meta">${item.category ? escapeHtml(item.category.name) : 'General'} · ${escapeHtml(formatDate(item.created_at))}</span>
+          </a>`
+          )
+          .join('')}
+      </div>
+    </section>`;
+}
+
+function bindCopyButtons(root) {
+  root.querySelectorAll('.copy-button').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const original = button.textContent;
       try {
-        const parsed = new URL(url);
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-          return `<figure><img src="${escapeHtml(parsed.href)}" alt="${escapeHtml(data.caption || "Article image")}" />${data.caption ? `<figcaption>${escapeHtml(data.caption)}</figcaption>` : ""}</figure>`;
-        }
-      } catch (_) { /* invalid image URL is ignored */ }
-      return "";
-    }
-    case "paragraph":
-    default:
-      return `<p>${text}</p>`;
-  }
+        await navigator.clipboard.writeText(decodeURIComponent(button.dataset.code || ''));
+        button.textContent = 'Copied!';
+        button.classList.add('is-copied');
+      } catch (err) {
+        console.error('Failed to copy code to clipboard', err);
+        button.textContent = 'Press Ctrl+C';
+      }
+      setTimeout(() => {
+        button.textContent = original;
+        button.classList.remove('is-copied');
+      }, 2000);
+    });
+  });
+}
+
+function emptyState(title, message, actionHref = 'articles.html', actionLabel = 'Browse Articles') {
+  return `
+    <div class="empty-state" role="alert">
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(message)}</p>
+      <a class="button button-secondary" href="${actionHref}">${escapeHtml(actionLabel)}</a>
+    </div>`;
 }
 
 async function initArticle() {
   const query = new URLSearchParams(location.search);
-  const articleId = query.get("id");
-  const shell = document.querySelector("#article-shell");
+  const articleKey = query.get('slug') || query.get('id');
+  const shell = document.querySelector('#article-shell');
 
-  if (!articleId) {
-    if (shell) {
-      shell.innerHTML = `
-        <div class="empty-state">
-          <h2>Article Not Found</h2>
-          <p>No valid article ID was provided in the URL.</p>
-          <a class="button button-primary" href="articles.html">Browse Articles</a>
-        </div>
-      `;
-    }
+  if (!articleKey) {
+    if (shell) shell.innerHTML = emptyState('Article Not Found', 'No valid article slug or ID was provided in the URL.');
     return;
   }
 
   try {
-    if (shell) {
-      shell.innerHTML = `<div class="loading"><span class="loading-spinner"></span>Loading article…</div>`;
-    }
+    if (shell) shell.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Loading article…</div>';
 
-    const article = await getArticle(articleId);
+    const article = await getArticle(articleKey);
+    applyDocumentMeta(article);
 
-    const snippetsMarkup = article.code_snippets?.map((snippet) => `
-      <section class="snippet">
-        <div>
-          <span>${escapeHtml(snippet.language)}</span>
-          <button class="copy-button" type="button" data-code="${encodeURIComponent(snippet.code)}">Copy code</button>
-        </div>
-        <pre><code>${escapeHtml(snippet.code)}</code></pre>
-      </section>
-    `).join("") || "";
+    // Related articles are a nice-to-have; the article itself must render even
+    // if that extra request fails.
+    const related = await loadRelated(article);
+    const hero = safeUrl(article.featured_image);
 
     if (shell) {
       shell.innerHTML = `
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+          <a href="index.html">Home</a>
+          <span aria-hidden="true">/</span>
+          <a href="articles.html">Articles</a>
+          ${article.category ? `<span aria-hidden="true">/</span><a href="articles.html?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>` : ''}
+        </nav>
+
         <article>
           <header class="article-header">
-            <div class="card-meta">
-              ${article.category ? `<a href="articles.html?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>` : "General"}
-              <span>·</span>
-              <time datetime="${article.created_at}">${formatDate(article.created_at)}</time>
-            </div>
+            <p class="eyebrow">${article.category ? escapeHtml(article.category.name) : 'General'}</p>
             <h1>${escapeHtml(article.title)}</h1>
-            <div class="tag-list">${tagsMarkup(article.tags)}</div>
-            ${article.author_email ? `<p class="byline">Published by ${escapeHtml(article.author_email)}</p>` : ""}
+            ${article.excerpt ? `<p class="article-excerpt">${escapeHtml(article.excerpt)}</p>` : ''}
+            <div class="article-byline">
+              ${article.author_name ? `<span class="byline">By ${escapeHtml(article.author_name)}</span>` : ''}
+              <time datetime="${escapeHtml(article.created_at || '')}">${escapeHtml(formatDate(article.created_at))}</time>
+              ${readingTime(article.content) ? `<span class="article-updated">${escapeHtml(readingTime(article.content))}</span>` : ''}
+              ${article.updated_at && article.updated_at !== article.created_at
+                ? `<span class="article-updated">Updated ${escapeHtml(formatDate(article.updated_at))}</span>`
+                : ''}
+            </div>
+            ${hero ? `<img class="article-featured-image" src="${escapeHtml(hero)}" alt="" />` : ''}
+            ${tagsMarkup(article.tags).length ? `<div class="tag-list">${tagsMarkup(article.tags)}</div>` : ''}
           </header>
-          
-          <div class="article-content">
-            ${renderContent(article.content)}
-          </div>
-          
-          ${snippetsMarkup}
 
-          <!-- Ask AI Section -->
+          <div class="article-content">${renderArticleContent(article.content)}</div>
+
+          ${snippetMarkup(article.code_snippets)}
+
           <section class="article-ai-cta">
             <div class="article-ai-cta-content">
               <h3>Have questions about this article?</h3>
-              <p>Ask our AI-powered learning assistant for explanations, alternative code examples, or conceptual breakdowns.</p>
+              <p>Ask the learning assistant for explanations, alternative code examples, or conceptual breakdowns — grounded in this article.</p>
             </div>
             <button class="button button-primary" id="ask-ai-cta-btn" type="button">Ask AI Assistant</button>
           </section>
-        </article>
-      `;
 
-      // Copy buttons handler
-      document.querySelectorAll(".copy-button").forEach((button) => {
-        button.addEventListener("click", async () => {
-          try {
-            await navigator.clipboard.writeText(decodeURIComponent(button.dataset.code));
-            button.textContent = "Copied!";
-            button.style.borderColor = "var(--success)";
-            setTimeout(() => {
-              button.textContent = "Copy code";
-              button.style.borderColor = "#506157";
-            }, 2000);
-          } catch (err) {
-            console.error("Failed to copy code to clipboard", err);
-          }
-        });
-      });
+          ${relatedMarkup(related)}
 
-      // Ask AI button trigger
-      const askAiBtn = document.querySelector("#ask-ai-cta-btn");
+          <p class="article-back"><a class="button button-secondary" href="articles.html">← Back to all articles</a></p>
+        </article>`;
+
+      bindCopyButtons(shell);
+
+      const askAiBtn = document.querySelector('#ask-ai-cta-btn');
       if (askAiBtn) {
-        askAiBtn.addEventListener("click", () => {
-          // Open Chat drawer using article slug
-          openChatForArticle(article.slug, article.title);
-        });
+        askAiBtn.addEventListener('click', () => openChatForArticle(article.slug, article.title));
       }
     }
   } catch (error) {
-    console.error("Failed to fetch article details:", error);
-    if (shell) {
-      const message = error instanceof ApiError ? error.message : "We couldn't retrieve the article content.";
-      shell.innerHTML = `
-        <div class="empty-state" role="alert">
-          <h2>Failed to load article</h2>
-          <p>${escapeHtml(message)}</p>
-          <a class="button button-secondary" href="articles.html">Back to Articles</a>
-        </div>
-      `;
-    }
+    console.error('Failed to fetch article details:', error);
+    if (!shell) return;
+    const message = error instanceof ApiError ? error.message : "We couldn't retrieve the article content.";
+    const notFound = error instanceof ApiError && error.status === 404;
+    shell.innerHTML = notFound
+      ? emptyState('Article Not Found', 'This article may have been unpublished or removed.')
+      : emptyState('Failed to load article', message);
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener('DOMContentLoaded', () => {
   initNavbar();
   initArticle();
 });

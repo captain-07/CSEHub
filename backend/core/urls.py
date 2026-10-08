@@ -14,8 +14,10 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 urlpatterns = [
@@ -27,3 +29,20 @@ urlpatterns = [
     path('api/', include('apps.users.urls')),
     path('api/', include('apps.chatbot.urls')),
 ]
+
+# Article images uploaded by the admin editor.
+#
+# Only registered for local filesystem storage. These files are deliberately not
+# part of STATIC_ROOT (collectstatic/WhiteNoise never sees them), so when the
+# filesystem is in use Django has to serve them. With remote object storage the
+# bucket's own CDN serves them and this route is unnecessary — leaving it
+# mounted would only shadow nothing while widening the URL surface.
+if not settings.USE_REMOTE_STORAGE:
+    urlpatterns += [
+        re_path(
+            r'^%s(?P<path>.*)$' % settings.MEDIA_URL.lstrip('/'),
+            serve,
+            {'document_root': settings.MEDIA_ROOT},
+            name='media',
+        ),
+    ]

@@ -8,6 +8,11 @@ class ChatServiceError(Exception):
     """A provider failure safe to report through the API."""
 
 
+# Returned when the article has no matching indexed content. This is a content
+# problem rather than a provider failure, so it is a normal 200 answer rather than
+# a 5xx — the client distinguishes "nothing to say" from "the service is down".
+NO_CONTEXT_ANSWER = "I don't have enough information from this article to answer that."
+
 SYSTEM_PROMPT = PromptTemplate(
     input_variables=["context", "history", "question"],
     template=(
@@ -68,8 +73,11 @@ def answer_question(article, question: str, history: str = '', k: int = 4) -> st
     except Exception as exc:
         raise ChatServiceError("The learning service is temporarily unavailable.") from exc
 
+    # An empty result set is a content problem, not an infrastructure fault: the
+    # article simply has nothing indexed that matches. Reported as a plain answer
+    # so the article author can tell the difference from an outage.
     if not docs:
-        return "I don't have enough information from this article to answer that."
+        return NO_CONTEXT_ANSWER
 
     context = "\n\n".join(doc.page_content for doc in docs)
 

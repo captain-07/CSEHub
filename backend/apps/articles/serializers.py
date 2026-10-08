@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.db import transaction
+from django.utils.text import slugify
 
-from .models import Category, Tag, Article, CodeSnippet
+from .models import Category, Tag, Article, CodeSnippet, SUPPORTED_BLOCK_TYPES
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -28,7 +29,8 @@ class ArticleListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Article
-        fields = ['id', 'title', 'slug', 'category', 'tags', 'created_at']
+        fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'category', 'tags',
+                  'is_published', 'is_featured', 'created_at', 'updated_at']
 
 
 class ArticleDetailSerializer(serializers.ModelSerializer):
@@ -36,14 +38,23 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, read_only=True)
     code_snippets = CodeSnippetSerializer(many=True, read_only=True)
     author_email = serializers.EmailField(source='author.email', read_only=True, default=None)
+    # Public bylines show a display name; the raw email stays available for the
+    # admin panel but is not what visitors see.
+    author_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
         fields = [
-            'id', 'title', 'slug', 'content', 'category',
-            'tags', 'code_snippets', 'author_email',
-            'is_published', 'created_at', 'updated_at'
+            'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category',
+            'tags', 'code_snippets', 'author_name', 'author_email',
+            'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
+
+    def get_author_name(self, article):
+        author = article.author
+        if not author:
+            return None
+        return author.display_name or author.username or author.email
 
 
 class ArticleWriteSerializer(serializers.ModelSerializer):
@@ -56,12 +67,13 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
         queryset=Tag.objects.all(), many=True, required=False
     )
     code_snippets = CodeSnippetSerializer(many=True, required=False)
+    slug = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
     class Meta:
         model = Article
         fields = [
-            'id', 'title', 'slug', 'content', 'category', 'tags',
-            'code_snippets', 'is_published', 'created_at', 'updated_at',
+            'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category', 'tags',
+            'code_snippets', 'is_published', 'is_featured', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -70,6 +82,47 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
         if len(orders) != len(set(orders)):
             raise serializers.ValidationError('Each code snippet must have a unique order.')
         return snippets
+
+    def validate(self, attrs):
+        """Derive a unique slug when the client leaves it blank.
+
+        On a partial update neither title nor slug may be present, so the
+        existing slug is retained rather than demanding one from the client.
+        """
+        slug = (attrs.get('slug') or '').strip()
+        title = (attrs.get('title') or '').strip()
+
+        if self.instance is not None and not slug and not title:
+            return attrs
+
+        if not slug and title:
+            slug = slugify(title)[:255]
+        if not slug:
+            raise serializers.ValidationError({'slug': 'A slug or a title is required.'})
+
+        queryset = Article.objects.filter(slug=slug)
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            base, suffix = slug, 2
+            while Article.objects.filter(slug=f'{base}-{suffix}').exists():
+                suffix += 1
+            slug = f'{base}-{suffix}'
+        attrs['slug'] = slug
+        return attrs
+
+    def validate_content(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Content must be an Editor.js document object.')
+        blocks = value.get('blocks')
+        if not isinstance(blocks, list):
+            raise serializers.ValidationError('Content must include a blocks array.')
+        if len(blocks) > 500:
+            raise serializers.ValidationError('Content has too many blocks.')
+        for block in blocks:
+            if not isinstance(block, dict) or block.get('type') not in SUPPORTED_BLOCK_TYPES or not isinstance(block.get('data'), dict):
+                raise serializers.ValidationError('Content contains an unsupported or malformed Editor.js block.')
+        return value
 
     @transaction.atomic
     def create(self, validated_data):

@@ -4,10 +4,27 @@ from apps.chatbot.ingestion import ingest_article
 
 
 class Command(BaseCommand):
-    help = 'Ingest all published articles into Pinecone'
+    help = 'Ingest published articles into the Pinecone vector index'
 
-    def handle(self, *args, **kwargs):
-        articles = Article.objects.filter(is_published=True)
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--slug',
+            help='Only ingest the article with this slug (idempotent — safe to re-run).',
+        )
+
+    def handle(self, *args, **options):
+        slug = options.get('slug')
+
+        if slug:
+            articles = Article.objects.filter(slug=slug, is_published=True)
+            if not articles.exists():
+                raise CommandError(
+                    f'No published article found with slug "{slug}". '
+                    'Drafts are not indexed — publish the article first.'
+                )
+        else:
+            articles = Article.objects.filter(is_published=True)
+
         if not articles.exists():
             self.stdout.write(self.style.WARNING('No published articles found.'))
             return

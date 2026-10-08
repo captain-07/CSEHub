@@ -60,17 +60,33 @@ export async function apiFetch(endpoint, options = {}) {
   }
 
   if (!response.ok) {
-    // 401 Unauthorized handling: Redirect to login.html if authentication is expired
-    if (response.status === 401) {
-      console.warn("Django backend returned 401 Unauthorized. Redirecting to login...");
-      // Check if not already on login page to prevent infinite redirects
-      if (!window.location.pathname.endsWith('login.html')) {
-        window.location.href = 'login.html?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
-        return;
+    // 401 means the Supabase token was missing or expired. Send the visitor to
+    // the sign-in page carrying their current location so they land back here.
+    //
+    // Navigation is *not* a substitute for returning a result: callers below
+    // would read `undefined` as an empty payload and conclude the account has
+    // no profile, which is indistinguishable from a signed-out visitor. So the
+    // redirect happens and the 401 is still thrown, carrying the server's own
+    // reason ("credentials were not provided" vs "invalid or expired token").
+    if (response.status === 401 && options.redirectOnUnauthorized) {
+      const here = window.location.pathname + window.location.search;
+      // Tolerates clean URLs, where the path is "/articles" rather than "/articles.html".
+      if (!/(^|\/)login(\.html)?$/.test(window.location.pathname)) {
+        console.warn('CSEHub API returned 401 — redirecting to sign in.');
+        window.location.href = `login.html?redirect=${encodeURIComponent(here)}`;
       }
     }
 
-    const errorMsg = data?.detail || data?.message || `API request failed with status ${response.status}`;
+    // Surface DRF field errors (e.g. {"title": ["This field is required."]})
+    // instead of a generic status message.
+    const fieldError = data && typeof data === 'object' && !Array.isArray(data)
+      ? Object.entries(data).find(([key, value]) => key !== 'detail' && typeof value === 'object' && value !== null)
+      : null;
+
+    const errorMsg = fieldError
+      ? `${Array.isArray(fieldError[1]) ? fieldError[1][0] : fieldError[1]}`
+      : data?.detail || data?.message || `API request failed with status ${response.status}`;
+
     throw new ApiError(errorMsg, response.status, data);
   }
 

@@ -27,11 +27,14 @@ class ArticleTagInline(admin.TabularInline):
 
 @admin.register(Article)
 class ArticleAdmin(admin.ModelAdmin):
-    list_display = ['title', 'category', 'author', 'is_published', 'created_at']
-    list_filter = ['category', 'is_published']
-    search_fields = ['title', 'content']
+    list_display = ['title', 'category', 'author', 'is_published', 'is_featured', 'created_at']
+    list_filter = ['category', 'is_published', 'is_featured']
+    # `content` is a JSONField, which has no text lookup — searching it raises
+    # FieldError, so the admin searches the human-readable text fields instead.
+    search_fields = ['title', 'excerpt']
     prepopulated_fields = {'slug': ('title',)}
-    list_editable = ['is_published']
+    list_editable = ['is_published', 'is_featured']
+    list_select_related = ['category', 'author']
     raw_id_fields = ['author']
     inlines = [ArticleTagInline, CodeSnippetInline]
     readonly_fields = ['created_at', 'updated_at']

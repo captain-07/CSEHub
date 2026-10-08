@@ -1,121 +1,141 @@
-import { getSupabase, getCurrentUser } from './supabase.js';
-import { logoutUser, onAuthChange } from './auth.js';
-import { apiFetch } from './api.js';
+import { logoutUser } from './auth.js';
+import { initAuth, subscribeAuth } from './auth-state.js';
+import { escapeHtml, safeUrl } from './renderer.js';
 
 /**
- * Injects and initializes the shared navigation bar into any element with the class `site-header`.
- * Observes authentication changes and updates link visibility, avatar, and user names dynamically.
+ * Injects the shared navigation bar into any `.site-header` element and keeps it
+ * in sync with authentication state.
+ *
+ * The Admin link is rendered only when the backend profile reports
+ * `is_admin`. That is a UX affordance only — `admin.js` re-checks the same
+ * value, and the API independently enforces `IsAdminUser`.
  */
+
+/** Works whether or not the host serves clean URLs (`/articles` vs `/articles.html`). */
+function currentPage() {
+  const path = window.location.pathname;
+  const file = path.split('/').filter(Boolean).pop() || 'index.html';
+  return file.replace(/\.html$/, '') || 'index';
+}
+
+function initials(name = '') {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+function avatarMarkup(avatarUrl, name) {
+  const url = safeUrl(avatarUrl);
+  if (url) {
+    return `<img class="user-avatar" src="${escapeHtml(url)}" alt="" referrerpolicy="no-referrer" />`;
+  }
+  return `<span class="user-avatar user-avatar-initials" aria-hidden="true">${escapeHtml(initials(name))}</span>`;
+}
+
+function searchFormMarkup() {
+  return `
+    <li class="nav-search">
+      <form role="search" action="articles.html" method="get" class="nav-search-form">
+        <label class="sr-only" for="nav-search-input">Search articles</label>
+        <input
+          class="nav-search-input"
+          id="nav-search-input"
+          type="search"
+          name="search"
+          placeholder="Search articles…"
+          autocomplete="off"
+        />
+      </form>
+    </li>`;
+}
+
 export function initNavbar() {
   const header = document.querySelector('.site-header');
   if (!header) return;
 
-  // Render the base skeleton
   header.innerHTML = `
     <div class="container">
       <a class="brand" href="index.html" aria-label="CSEHub home">
-        <span class="brand-mark">&lt;/&gt;</span>CSEHub
+        <span class="brand-mark" aria-hidden="true">&lt;/&gt;</span>CSEHub
       </a>
-      <button class="mobile-nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+      <button class="mobile-nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav-menu">☰</button>
       <nav aria-label="Primary navigation">
-        <ul class="nav-menu" id="nav-menu">
-          <!-- Populated dynamically -->
-        </ul>
+        <ul class="nav-menu" id="nav-menu"></ul>
       </nav>
-    </div>
-  `;
+    </div>`;
 
   const menu = header.querySelector('#nav-menu');
   const toggle = header.querySelector('.mobile-nav-toggle');
 
-  // Toggle mobile navigation menu
   toggle.addEventListener('click', () => {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
-    toggle.setAttribute('aria-expanded', !expanded);
+    toggle.setAttribute('aria-expanded', String(!expanded));
     toggle.textContent = expanded ? '☰' : '✕';
     menu.classList.toggle('active');
   });
 
-  // Track authentication changes to update navigation
-  onAuthChange(async (event, session) => {
-    await updateNavbarLinks(menu, session?.user || null);
+  // Close the mobile menu after following a link inside it.
+  menu.addEventListener('click', (event) => {
+    if (event.target.closest('a')) {
+      menu.classList.remove('active');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = '☰';
+    }
   });
 
-  // Initial update
-  getCurrentUser().then(user => {
-    updateNavbarLinks(menu, user);
-  });
+  subscribeAuth((state) => renderMenu(menu, state));
+  initAuth();
 }
 
-async function updateNavbarLinks(menu, user) {
-  const currentPath = window.location.pathname;
-  const isIndexActive = currentPath.endsWith('index.html') || currentPath === '/' || currentPath.endsWith('/');
-  const isArticlesActive = currentPath.includes('articles.html') || currentPath.includes('article.html');
-  const isProfileActive = currentPath.includes('profile.html');
-  const isLoginActive = currentPath.includes('login.html');
+function renderMenu(menu, state) {
+  const { ready, user, profile } = state;
+  const page = currentPage();
+  const active = (name) => (page === name ? ' active' : '');
+
+  const primaryLinks = `
+    <li><a class="nav-link${active('articles')}" href="articles.html">Articles</a></li>
+    <li><a class="nav-link${active('categories')}" href="categories.html">Categories</a></li>
+    ${searchFormMarkup()}`;
+
+  if (!ready) {
+    menu.innerHTML = `${primaryLinks}<li class="nav-link nav-loading">Loading account…</li>`;
+    return;
+  }
 
   if (!user) {
-    // Guest User Links
+    // Google is the only sign-in method the site offers, so the link says so
+    // rather than implying a password form that does not exist.
     menu.innerHTML = `
-      <li><a class="nav-link ${isIndexActive ? 'active' : ''}" href="index.html">Home</a></li>
-      <li><a class="nav-link ${isArticlesActive ? 'active' : ''}" href="articles.html">Articles</a></li>
-      <li><a class="nav-link ${isLoginActive ? 'active' : ''}" href="login.html">Login</a></li>
-    `;
-  } else {
-    // Authenticated User Links
-    let displayName = user.email.split('@')[0];
-    let avatarUrl = "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y"; // Default avatar placeholder
-    
-    // Attempt to fetch profile details from backend
-    try {
-      const djangoProfile = await apiFetch('/me/');
-      if (djangoProfile) {
-        displayName = djangoProfile.display_name || djangoProfile.username || displayName;
-        if (djangoProfile.avatar_url) {
-          avatarUrl = djangoProfile.avatar_url;
-        }
-      }
-    } catch (e) {
-      console.warn("Could not sync profile metadata from Django API:", e);
-      // Use metadata from Supabase user info if Django fails
-      if (user.user_metadata) {
-        displayName = user.user_metadata.full_name || user.user_metadata.name || displayName;
-        avatarUrl = user.user_metadata.avatar_url || avatarUrl;
-      }
-    }
-
-    menu.innerHTML = `
-      <li><a class="nav-link ${isIndexActive ? 'active' : ''}" href="index.html">Home</a></li>
-      <li><a class="nav-link ${isArticlesActive ? 'active' : ''}" href="articles.html">Articles</a></li>
-      <li>
-        <a class="nav-link ${isProfileActive ? 'active' : ''} user-profile-badge" href="profile.html">
-          <img class="user-avatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(displayName)}'s avatar" />
-          <span>${escapeHtml(displayName)}</span>
-        </a>
-      </li>
-      <li><a class="nav-link" href="#" id="logout-link">Logout</a></li>
-    `;
-
-    // Hook up logout listener
-    const logoutBtn = menu.querySelector('#logout-link');
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          await logoutUser();
-        } catch (error) {
-          console.error("Logout failed:", error);
-        }
-      });
-    }
+      ${primaryLinks}
+      <li><a class="button button-primary nav-signin${active('login')}" href="login.html">Sign in with Google</a></li>`;
+    return;
   }
-}
 
-function escapeHtml(value = "") {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  const displayName = profile?.display_name || profile?.username || user.email?.split('@')[0] || 'Student';
+  const avatar = avatarMarkup(profile?.avatar_url || user.user_metadata?.avatar_url, displayName);
+
+  menu.innerHTML = `
+    ${primaryLinks}
+    ${profile?.is_admin ? `<li><a class="nav-link${active('admin')}" href="admin.html">Admin</a></li>` : ''}
+    <li>
+      <a class="nav-link user-profile-badge${active('profile')}" href="profile.html" title="${escapeHtml(displayName)}">
+        ${avatar}
+        <span class="user-name">${escapeHtml(displayName)}</span>
+      </a>
+    </li>
+    <li><button class="nav-link nav-logout" type="button" id="logout-link">Logout</button></li>`;
+
+  const logoutBtn = menu.querySelector('#logout-link');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      logoutBtn.disabled = true;
+      try {
+        await logoutUser();
+      } catch (error) {
+        console.error('Logout failed', error);
+        logoutBtn.disabled = false;
+      }
+    });
+  }
 }

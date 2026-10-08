@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import sys
 import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -25,6 +26,7 @@ AUTH_USER_MODEL = 'users.User'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 SUPABASE_URL = env('SUPABASE_URL', default='')
+DJANGO_SUPERUSER_EMAIL = env('DJANGO_SUPERUSER_EMAIL', default='')
 
 
 # Quick-start development settings - unsuitable for production
@@ -97,8 +99,21 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+TEST_DATABASE_URL = env('TEST_DATABASE_URL', default='')
+TESTING = 'test' in sys.argv
 DATABASE_URL = env('DATABASE_URL', default='')
-if DATABASE_URL:
+if TESTING and not TEST_DATABASE_URL:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
+elif TEST_DATABASE_URL:
+    DATABASES = {
+        'default': env.db('TEST_DATABASE_URL'),
+    }
+elif DATABASE_URL:
     DATABASES = {
         'default': env.db('DATABASE_URL'),
     }
@@ -150,7 +165,104 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Admin-uploaded article images. These are deliberately NOT part of STATIC_ROOT:
+# collectstatic/WhiteNoise never sees them, so /media/ is served by Django (see
+# core/urls.py). `API_PUBLIC_BASE_URL` pins the public origin for deployments
+# where the request host is not the address users browse to.
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+API_PUBLIC_BASE_URL = env('API_PUBLIC_BASE_URL', default='')
+
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+}
+
+# --- Article image storage -------------------------------------------------
+#
+# `USE_REMOTE_STORAGE` switches uploaded article images from the local filesystem
+# to any S3-compatible object store. Supabase Storage is what this project uses;
+# R2, Spaces and MinIO work unchanged by editing the endpoint.
+#
+# Local development and CI keep the filesystem so nothing here needs credentials
+# to run the test suite.
+#
+# Two options below are easy to get wrong and fail *quietly*:
+#
+#   querystring_auth=False  Supabase object URLs are already public. Left True,
+#                          django-storages appends a short-lived signature, so
+#                          every stored image URL in article JSON expires.
+#   custom_domain          Without it, generated URLs point at the S3 API
+#                          endpoint, which requires a signature *even for a public
+#                          bucket* — uploads succeed and every image 403s.
+#                          The value is the public REST path and must omit the
+#                          scheme, which django-storages adds itself.
+#
+# See `apps.articles.media.ImageUploadView` for the only caller.
+USE_REMOTE_STORAGE = env.bool('USE_REMOTE_STORAGE', default=False)
+SUPABASE_PROJECT_REF = env('SUPABASE_PROJECT_REF', default='')
+
+# Placeholders copied from .env.example. These produce syntactically valid but
+# entirely fictional hosts (`your-project-ref.storage.supabase.co`), so every
+# uploaded image would 404 with no obvious cause — worth catching at startup.
+_PLACEHOLDER_VALUES = {'', 'your-project-ref', 'your_project_ref', 'changeme', 'changeme'}
+
+if USE_REMOTE_STORAGE:
+    if SUPABASE_PROJECT_REF.strip().lower() in _PLACEHOLDER_VALUES:
+        raise environ.ImproperlyConfigured(
+            'SUPABASE_PROJECT_REF is still the placeholder value. Set it to your '
+            "project ref — the subdomain of your project URL, e.g. 'abc123xyz' "
+            'from https://abc123xyz.supabase.co — or set USE_REMOTE_STORAGE=False '
+            'to use local filesystem storage.'
+        )
+
+    _bucket = env('SUPABASE_STORAGE_BUCKET', default='articles')
+    for _name, _value in (
+        ('SUPABASE_S3_ACCESS_KEY_ID', env('SUPABASE_S3_ACCESS_KEY_ID', default='')),
+        ('SUPABASE_S3_SECRET_ACCESS_KEY', env('SUPABASE_S3_SECRET_ACCESS_KEY', default='')),
+    ):
+        if not _value or _value.lower() in _PLACEHOLDER_VALUES or _value.startswith('your-'):
+            raise environ.ImproperlyConfigured(
+                f'{_name} is missing or still a placeholder. Generate a pair in '
+                'the Supabase dashboard under Storage -> S3 Settings. These are '
+                'S3 protocol keys, NOT the service_role key.'
+            )
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'bucket_name': _bucket,
+            # The dedicated storage hostname, not the project hostname.
+            'endpoint_url': env(
+                'SUPABASE_S3_ENDPOINT_URL',
+                default=(
+                    f'https://{SUPABASE_PROJECT_REF}.storage.supabase.co/storage/v1/s3'
+                ),
+            ),
+            'access_key': env('SUPABASE_S3_ACCESS_KEY_ID', default=''),
+            'secret_key': env('SUPABASE_S3_SECRET_ACCESS_KEY', default=''),
+            'region_name': env('SUPABASE_S3_REGION', default=SUPABASE_PROJECT_REF),
+            # Supabase does not support virtual-hosted-style URLs.
+            'addressing_style': 'path',
+            'signature_version': 's3v4',
+            'querystring_auth': False,
+            'custom_domain': (
+                f'{SUPABASE_PROJECT_REF}.supabase.co/storage/v1/object/public/{_bucket}'
+            ),
+            # Images are public article assets; never make them private.
+            'default_acl': None,
+        },
+    }
+
+# --- Image optimisation ----------------------------------------------------
+#
+# Uploaded images are downscaled and re-encoded before storage. The reading
+# column is ~800px wide, so the default caps the long edge at 2x that.
+# See apps.articles.image_processing.
+IMAGE_MAX_DIMENSION = env.int('IMAGE_MAX_DIMENSION', default=1600)
+IMAGE_WEBP_QUALITY = env.int('IMAGE_WEBP_QUALITY', default=82)
+IMAGE_WEBP_METHOD = env.int('IMAGE_WEBP_METHOD', default=6)
+IMAGE_MIN_SAVINGS_RATIO = env.float('IMAGE_MIN_SAVINGS_RATIO', default=0.10)
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
@@ -163,6 +275,8 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in env.list('CSRF_TRUSTED_ORIGINS', default=['http://localhost:3000'])
     if origin.strip()
 ]
+
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 if not DEBUG:
     # Render terminates SSL at the proxy/load balancer.

@@ -15,6 +15,7 @@ export function getSupabase() {
     // Only initialize if we have the configuration details
     if (!CONFIG.SUPABASE_URL || CONFIG.SUPABASE_URL.includes("YOUR_SUPABASE_URL") || CONFIG.SUPABASE_ANON_KEY.includes("YOUR_SUPABASE_ANON_KEY")) {
       console.warn("Supabase URL or ANON KEY is not configured in js/config.js. Authentication will not function.");
+      return null;
     }
     supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
   }

@@ -1,33 +1,62 @@
-
-# Create your views here.
 from rest_framework import viewsets, filters
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAdminUser, AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+from django.http import Http404
 from django_filters.rest_framework import DjangoFilterBackend
+from apps.chatbot.ingestion import ingest_article
 from .models import Category, Tag, Article
 from .serializers import (
     CategorySerializer, TagSerializer,
     ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
+class AdminWriteOrReadAnyMixin:
+    """Public read, admin-only writes.
+
+    The frontend hides admin controls, but this is the layer that actually
+    enforces authorization: a client that skips the UI still gets a 403.
+
+    `get_permissions` is the single source of truth, so any admin-only action
+    must be listed in ADMIN_ACTIONS — a per-action `permission_classes` would be
+    silently ignored because this method overrides DRF's default resolution.
+    """
+
+    ADMIN_ACTIONS = ('create', 'update', 'partial_update', 'destroy')
+
+    def get_permissions(self):
+        if self.action in self.ADMIN_ACTIONS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
+class CategoryViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = [AllowAny]
+    lookup_field = 'pk'
 
 
-class TagViewSet(viewsets.ReadOnlyModelViewSet):
+class TagViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     queryset = Tag.objects.all()
     serializer_class = TagSerializer
-    permission_classes = [AllowAny]
+    lookup_field = 'pk'
 
 
-class ArticleViewSet(viewsets.ModelViewSet):
+class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
+    ADMIN_ACTIONS = AdminWriteOrReadAnyMixin.ADMIN_ACTIONS + ('reindex',)
     queryset = Article.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['category__slug', 'tags__slug']
-    search_fields = ['title', 'content']
-    ordering_fields = ['created_at']
+    # `is_published` is exposed so the admin list can filter by status. It is safe
+    # to expose publicly because `get_queryset` already hides drafts from anyone
+    # who is not staff, so the filter can only ever narrow an already-filtered set.
+    filterset_fields = ['category__slug', 'tags__slug', 'is_featured', 'is_published']
+    search_fields = ['title', 'excerpt']
+    ordering_fields = ['created_at', 'title']
     ordering = ['-created_at']
 
     def get_serializer_class(self):
@@ -44,12 +73,59 @@ class ArticleViewSet(viewsets.ModelViewSet):
         # Staff need drafts to manage content; everyone else can only see published work.
         if not self.request.user.is_staff:
             queryset = queryset.filter(is_published=True)
-        return queryset
+        return queryset.distinct()
+
+    lookup_field = 'slug'
+    lookup_value_regex = '[^/]+'
+
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_val = self.kwargs.get(lookup_url_kwarg)
+
+        # Primary lookup: slug
+        obj = queryset.filter(slug=lookup_val).first()
+        if obj is not None:
+            self.check_object_permissions(self.request, obj)
+            return obj
+
+        # Backward-compatibility fallback: if lookup_val is numeric, try integer id/pk
+        if lookup_val and str(lookup_val).isdigit():
+            obj = queryset.filter(pk=int(lookup_val)).first()
+            if obj is not None:
+                self.check_object_permissions(self.request, obj)
+                return obj
+
+        raise Http404("No article found matching the query")
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        return [AllowAny()]
+    @action(detail=True, methods=['post'])
+    def reindex(self, request, slug=None, **kwargs):
+        """Send this article's content to the vector store.
+
+        Embedding is deliberately *not* performed inside `perform_create` /
+        `update`: it costs a network round-trip to Pinecone plus a Gemini
+        embedding call, which must not block a normal save. Admins trigger it
+        explicitly, or via `manage.py ingest_articles`.
+        """
+        article = self.get_object()
+        if not article.is_published:
+            return Response(
+                {'detail': 'Publish this article before indexing it.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            chunks = ingest_article(article)
+        except RuntimeError as exc:
+            # RAG is optional infrastructure; a missing key must not look like
+            # a server fault or silently corrupt the article save.
+            return Response({'detail': str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as exc:
+            logger.exception('Reindexing failed for article %s', article.pk)
+            return Response(
+                {'detail': f'Reindexing failed: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({'status': 'indexed', 'slug': article.slug, 'chunks': chunks})

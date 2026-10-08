@@ -3,10 +3,34 @@ from jwt import PyJWKClient
 from functools import lru_cache
 
 from django.conf import settings
+from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
 from apps.users.models import User
+
+
+class SupabaseJWTAuthenticationScheme(OpenApiAuthenticationExtension):
+    """Teach drf-spectacular about Supabase bearer tokens.
+
+    Without this, the generated schema has no security scheme, so the Swagger UI
+    renders without an "Authorize" button and every endpoint looks unauthenticated.
+    """
+
+    target_class = 'apps.users.authentication.SupabaseJWTAuthentication'
+    name = 'supabaseJwtAuth'
+
+    def get_security_definition(self, auto_schema):
+        return {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+            'description': (
+                'Supabase access token. Sign in with Google in the frontend and the '
+                'session token is sent as `Authorization: Bearer <token>`. Paste the '
+                'access token here to call protected endpoints.'
+            ),
+        }
 
 
 class SupabaseJWTAuthentication(BaseAuthentication):
@@ -50,24 +74,38 @@ class SupabaseJWTAuthentication(BaseAuthentication):
                 raise AuthenticationFailed("Token missing email")
             metadata = payload.get('user_metadata') or {}
             requested_name = metadata.get('user_name') or metadata.get('preferred_username')
+            superuser_email = getattr(settings, 'DJANGO_SUPERUSER_EMAIL', '').strip().lower()
+            is_admin_email = bool(superuser_email and email == superuser_email)
+
+            defaults = {
+                "email": email,
+                "username": _available_username(requested_name or email, supabase_uid),
+                "display_name": metadata.get('full_name') or metadata.get('name') or (requested_name if requested_name != email else ''),
+                "avatar_url": metadata.get('avatar_url') or '',
+                "is_staff": is_admin_email,
+                "is_superuser": is_admin_email,
+            }
             user, created = User.objects.get_or_create(
                 supabase_uid=supabase_uid,
-                defaults={"email": email, "username": _available_username(requested_name or email, supabase_uid)},
+                defaults=defaults,
             )
             if not created:
-                # Supabase UID is the stable identity. Keep local data in sync
-                # while avoiding collisions with local profile usernames.
+                # Supabase UID is the stable identity. Keep local email in sync if changed,
+                # but preserve user profile customizations (username, display_name, avatar_url).
                 changed_fields = []
-                if requested_name:
+                if is_admin_email and (not user.is_staff or not user.is_superuser):
+                    user.is_staff = True
+                    user.is_superuser = True
+                    changed_fields.extend(['is_staff', 'is_superuser'])
+                if not user.username and requested_name:
                     username = _available_username_for_user(requested_name, supabase_uid, user.pk)
-                    if user.username != username:
-                        user.username = username
-                        changed_fields.append('username')
+                    user.username = username
+                    changed_fields.append('username')
                 if user.email != email and not User.objects.exclude(pk=user.pk).filter(email=email).exists():
                     user.email = email
                     changed_fields.append('email')
                 avatar_url = metadata.get('avatar_url')
-                if avatar_url and user.avatar_url != avatar_url:
+                if avatar_url and not user.avatar_url:
                     user.avatar_url = avatar_url
                     changed_fields.append('avatar_url')
                 if changed_fields:

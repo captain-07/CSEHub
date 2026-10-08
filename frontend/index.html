@@ -3,8 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="CSEHub — Learn Computer Science. Build Strong Foundations." />
-    <title>CSEHub — Home</title>
+    <meta name="description" content="CSEHub — practical computer science articles on data structures, algorithms, systems, databases and languages, with runnable code examples." />
+    <title>CSEHub — Learn Computer Science. Build Strong Foundations.</title>
+
+    <!-- Open Graph. js/article.js rewrites these for a single article page. -->
+    <meta property="og:site_name" content="CSEHub" />
+    <meta property="og:title" content="CSEHub — Learn Computer Science" />
+    <meta property="og:type" content="website" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -27,29 +32,55 @@
         
         <div class="hero-actions">
           <a class="button button-primary" href="articles.html">Explore Articles</a>
-          <a class="button button-secondary" href="articles.html?search=AI">Ask AI Assistant</a>
+          <a class="button button-secondary" href="categories.html">Browse by subject</a>
         </div>
+      </section>
+
+      <section class="features-section container" id="featured-section" hidden>
+        <div class="results-heading">
+          <h2>Featured lessons</h2>
+          <a class="text-link" href="articles.html">View all articles →</a>
+        </div>
+        <div class="article-grid" id="featured-articles"></div>
+      </section>
+
+      <section class="features-section container">
+        <div class="results-heading">
+          <h2>Recently published</h2>
+          <a class="text-link" href="articles.html">View all articles →</a>
+        </div>
+        <div class="article-grid" id="recent-articles">
+          <div class="loading"><span class="loading-spinner"></span>Loading articles…</div>
+        </div>
+        <p class="section-footnote" id="article-count"></p>
+      </section>
+
+      <section class="features-section container" id="categories-section">
+        <div class="results-heading">
+          <h2>Explore by subject</h2>
+          <a class="text-link" href="categories.html">All subjects →</a>
+        </div>
+        <div class="tag-list" id="popular-categories"></div>
       </section>
 
       <section class="features-section container">
         <h2>What CSEHub Offers</h2>
         <div class="features-grid">
           <div class="feature-card">
-            <h3>CS Articles</h3>
-            <p>Clear, production-quality explanations of data structures, algorithms, system designs, and patterns.</p>
+            <h3>Focused explanations</h3>
+            <p>Structured articles on data structures, algorithms, systems, databases and languages — written to be read start to finish.</p>
           </div>
           <div class="feature-card">
-            <h3>Code Examples</h3>
-            <p>Ready-to-use, readable code blocks in python, javascript, and more that you can easily copy and study.</p>
+            <h3>Runnable code</h3>
+            <p>Every lesson carries copy-ready code blocks with a language label, so you can study the implementation, not just the theory.</p>
           </div>
           <div class="feature-card">
-            <h3>AI Learning Assistant</h3>
-            <p>Stuck on an explanation? Open the AI chatbot on any article to ask questions, request examples, or clear up doubts.</p>
+            <h3>Learning assistant</h3>
+            <p>Open the assistant on any article to ask for a clearer explanation, a worked example, or a second example in another language.</p>
           </div>
-          <div class="feature-card" style="border-style: dashed; background-color: transparent;">
-            <h3>Coding Problems</h3>
-            <p style="color: var(--text-secondary); font-weight: 600; margin-top: 0.5rem; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em;">Coming Soon</p>
-            <p>Interactive coding exercises with automated test cases and submissions. Launching in the next release!</p>
+          <div class="feature-card">
+            <h3>Curated paths</h3>
+            <p>Filter by category and tag to build a study route through the subjects you are revising for.</p>
           </div>
         </div>
       </section>
@@ -63,14 +94,8 @@
     </footer>
 
     <!-- Supabase Client Library CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
     
-    <!-- Initialize navbar page load script -->
-    <script type="module">
-      import { initNavbar } from './js/navbar.js';
-      document.addEventListener("DOMContentLoaded", () => {
-        initNavbar();
-      });
-    </script>
+    <script type="module" src="js/home.js"></script>
   </body>
 </html>

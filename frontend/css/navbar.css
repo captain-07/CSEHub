@@ -42,7 +42,7 @@
 .nav-menu {
   display: flex;
   align-items: center;
-  gap: 2rem;
+  gap: var(--space-md);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -51,8 +51,13 @@
 .nav-link {
   color: var(--text-secondary);
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
   transition: color 0.2s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
 }
 
 .nav-link:hover {
@@ -64,14 +69,57 @@
   color: var(--accent);
 }
 
+.nav-loading {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.nav-logout {
+  color: var(--text-secondary);
+}
+
+/* Inline search */
+.nav-search {
+  margin: 0;
+}
+
+.nav-search-form {
+  display: flex;
+}
+
+.nav-search-input {
+  width: 11rem;
+  max-width: 40vw;
+  padding: 0.4rem var(--space-2xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background-color: var(--bg-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  transition: width 0.2s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.nav-search-input:focus {
+  outline: none;
+  width: 15rem;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.nav-signin {
+  min-height: 36px;
+  padding: 0.3rem 0.9rem;
+}
+
 /* Authed User Info */
 .user-profile-badge {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2xs);
   color: var(--text-primary);
   font-weight: 600;
-  font-size: 0.88rem;
+  font-size: var(--text-sm);
 }
 
 .user-avatar {
@@ -81,6 +129,22 @@
   object-fit: cover;
   border: 1px solid var(--border);
   background-color: var(--accent-soft);
+  flex-shrink: 0;
+}
+
+.user-avatar-initials {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: var(--text-xs);
+}
+
+.user-name {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Mobile Toggle */
@@ -93,6 +157,28 @@
   color: var(--text-primary);
 }
 
+@media (max-width: 1080px) {
+  /* The search field is the first thing to give up width: the destination
+     links and the account control must stay readable. */
+  .nav-search-input {
+    width: 8rem;
+  }
+
+  .nav-search-input:focus {
+    width: 11rem;
+  }
+
+  .nav-menu {
+    gap: var(--space-sm);
+  }
+}
+
+@media (max-width: 900px) {
+  .user-name {
+    display: none;
+  }
+}
+
 @media (max-width: 768px) {
   .mobile-nav-toggle {
     display: block;
@@ -101,18 +187,31 @@
   .nav-menu {
     display: none;
     flex-direction: column;
+    align-items: stretch;
     position: absolute;
     top: 76px;
     left: 0;
     right: 0;
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
-    padding: 1.5rem 2rem;
-    gap: 1.25rem;
+    padding: var(--space-md);
+    gap: var(--space-sm);
     box-shadow: var(--shadow);
+    max-height: calc(100vh - 76px);
+    overflow-y: auto;
   }
 
   .nav-menu.active {
     display: flex;
+  }
+
+  .nav-search-input,
+  .nav-search-input:focus {
+    width: 100%;
+    max-width: none;
+  }
+
+  .nav-menu .nav-signin {
+    width: 100%;
   }
 }

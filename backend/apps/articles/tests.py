@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 
 from rest_framework.test import APITestCase
 
-from .models import Article, Category, CodeSnippet, Tag
+from .models import Article, Category, Tag, SUPPORTED_BLOCK_TYPES
 
 
 class ArticleAPITests(APITestCase):
@@ -16,10 +16,10 @@ class ArticleAPITests(APITestCase):
             email='user@example.com', username='user', password='password'
         )
         self.published = Article.objects.create(
-            title='Public', slug='public', content='content', category=self.category, is_published=True
+            title='Public', slug='public', content={'blocks': []}, category=self.category, is_published=True
         )
         self.draft = Article.objects.create(
-            title='Draft', slug='draft', content='content', category=self.category
+            title='Draft', slug='draft', content={'blocks': []}, category=self.category
         )
 
     def test_public_users_only_see_published_articles(self):
@@ -28,11 +28,21 @@ class ArticleAPITests(APITestCase):
         self.assertEqual([item['slug'] for item in response.data['results']], ['public'])
         self.assertEqual(self.client.get(f'/api/articles/{self.draft.pk}/').status_code, 404)
 
+    def test_article_detail_lookup_by_slug_and_id_fallback(self):
+        by_slug = self.client.get(f'/api/articles/{self.published.slug}/')
+        self.assertEqual(by_slug.status_code, 200)
+        self.assertEqual(by_slug.data['slug'], self.published.slug)
+
+        by_id = self.client.get(f'/api/articles/{self.published.pk}/')
+        self.assertEqual(by_id.status_code, 200)
+        self.assertEqual(by_id.data['slug'], self.published.slug)
+        self.assertEqual(by_slug.data['id'], by_id.data['id'])
+
     def test_staff_can_manage_drafts_and_write_relationships(self):
         self.client.force_authenticate(self.staff)
         self.assertEqual(self.client.get(f'/api/articles/{self.draft.pk}/').status_code, 200)
         payload = {
-            'title': 'Created', 'slug': 'created', 'content': 'body',
+            'title': 'Created', 'slug': 'created', 'content': {'blocks': [{'type': 'paragraph', 'data': {'text': 'body'}}]},
             'category': self.category.pk, 'tags': [self.tag.pk], 'is_published': False,
             'code_snippets': [{'language': 'python', 'code': 'print(1)', 'order': 1}],
         }
@@ -47,12 +57,160 @@ class ArticleAPITests(APITestCase):
 
     def test_normal_user_cannot_write(self):
         self.client.force_authenticate(self.user)
-        response = self.client.post('/api/articles/', {'title': 'No', 'slug': 'no', 'content': 'no'}, format='json')
+        response = self.client.post('/api/articles/', {'title': 'No', 'slug': 'no', 'content': {'blocks': []}}, format='json')
         self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_user_cannot_write(self):
+        response = self.client.post('/api/articles/', {'title': 'No', 'slug': 'no2', 'content': {'blocks': []}}, format='json')
+        self.assertEqual(response.status_code, 401)
+
+    def test_normal_user_cannot_mutate_or_delete_existing_article(self):
+        """The frontend hides these controls; the API must still refuse them."""
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.patch(f'/api/articles/{self.published.pk}/', {'is_published': False}, format='json').status_code, 403)
+        self.assertEqual(self.client.delete(f'/api/articles/{self.published.pk}/').status_code, 403)
+        self.published.refresh_from_db()
+        self.assertTrue(self.published.is_published, 'article must not have been modified')
 
     def test_pagination_has_drfs_urls(self):
         for number in range(25):
-            Article.objects.create(title=f'Article {number}', slug=f'article-{number}', content='x', is_published=True)
+            Article.objects.create(title=f'Article {number}', slug=f'article-{number}', content={'blocks': []}, is_published=True)
         response = self.client.get('/api/articles/?page=2')
         self.assertEqual(response.status_code, 200)
         self.assertIn('/api/articles/', response.data['previous'])
+
+    def test_category_and_tag_writes_are_admin_only(self):
+        """Reads stay public; writes are refused for anonymous and normal users."""
+        self.assertEqual(self.client.get('/api/categories/').status_code, 200)
+        self.assertEqual(self.client.get('/api/tags/').status_code, 200)
+
+        self.assertEqual(
+            self.client.post('/api/categories/', {'name': 'X', 'slug': 'x'}, format='json').status_code,
+            401,
+        )
+        self.client.force_authenticate(self.user)
+        self.assertEqual(
+            self.client.post('/api/categories/', {'name': 'X', 'slug': 'x'}, format='json').status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post('/api/tags/', {'name': 'Y', 'slug': 'y'}, format='json').status_code,
+            403,
+        )
+
+        self.client.force_authenticate(self.staff)
+        created = self.client.post('/api/categories/', {'name': 'Algorithms', 'slug': 'algorithms'}, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(self.client.delete(f'/api/categories/{created.data["id"]}/').status_code, 204)
+
+    def test_malformed_editorjs_content_is_rejected(self):
+        self.client.force_authenticate(self.staff)
+        for payload in (
+            {'title': 'Bad', 'slug': 'bad-1', 'content': 'plain string'},
+            {'title': 'Bad', 'slug': 'bad-2', 'content': {'no_blocks': True}},
+            {'title': 'Bad', 'slug': 'bad-3', 'content': {'blocks': [{'type': 'evil', 'data': {}}]}},
+            {'title': 'Bad', 'slug': 'bad-4', 'content': {'blocks': [{'type': 'header', 'data': 'not-a-dict'}]}},
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    self.client.post('/api/articles/', payload, format='json').status_code,
+                    400,
+                )
+
+    def test_slug_is_derived_and_deduplicated(self):
+        self.client.force_authenticate(self.staff)
+        first = self.client.post(
+            '/api/articles/', {'title': 'Binary Search', 'slug': '', 'content': {'blocks': []}}, format='json'
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(first.data['slug'], 'binary-search')
+
+        second = self.client.post(
+            '/api/articles/', {'title': 'Binary Search', 'slug': '', 'content': {'blocks': []}}, format='json'
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(second.data['slug'], 'binary-search-2')
+
+    def test_is_featured_can_be_filtered(self):
+        Article.objects.create(title='Star', slug='star', content={'blocks': []}, is_published=True, is_featured=True)
+        response = self.client.get('/api/articles/?is_featured=true')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['slug'] for item in response.data['results']], ['star'])
+
+    def test_is_published_can_be_filtered_for_staff(self):
+        """The admin list filters by status, so both truthy and falsy forms work.
+
+        Without a staff user the draft is hidden by `get_queryset` regardless of
+        the filter, which would make a broken `false` value look correct.
+        """
+        self.client.force_authenticate(self.staff)
+        for value, expected in (
+            ('true', {'public'}),
+            ('1', {'public'}),
+            ('false', {'draft'}),
+            ('0', {'draft'}),
+        ):
+            with self.subTest(is_published=value):
+                response = self.client.get(f'/api/articles/?is_published={value}')
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    {item['slug'] for item in response.data['results']},
+                    expected,
+                )
+
+    def test_reindex_requires_admin_and_published_article(self):
+        self.assertEqual(
+            self.client.post(f'/api/articles/{self.published.pk}/reindex/').status_code, 401
+        )
+        self.client.force_authenticate(self.user)
+        self.assertEqual(
+            self.client.post(f'/api/articles/{self.published.pk}/reindex/').status_code, 403
+        )
+        self.client.force_authenticate(self.staff)
+        # Unpublished articles cannot be indexed.
+        self.assertEqual(
+            self.client.post(f'/api/articles/{self.draft.pk}/reindex/').status_code, 409
+        )
+
+    def test_detail_exposes_author_name_without_requiring_the_client_to_derive_it(self):
+        self.staff.display_name = 'Debjyoti Saha'
+        self.staff.save()
+        self.published.author = self.staff
+        self.published.save()
+
+        response = self.client.get(f'/api/articles/{self.published.pk}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['author_name'], 'Debjyoti Saha')
+        # Falls back to the username, then the email, when no display name is set.
+        self.staff.display_name = ''
+        self.staff.save()
+        self.published.refresh_from_db()
+        response = self.client.get(f'/api/articles/{self.published.pk}/')
+        self.assertEqual(response.data['author_name'], self.staff.username)
+
+    def test_every_supported_block_type_round_trips(self):
+        """The serializer allow-list is the contract the editor toolbar is built on."""
+        self.client.force_authenticate(self.staff)
+        blocks = [
+            {'type': 'paragraph', 'data': {'text': 'Body <b>bold</b>'}},
+            {'type': 'header', 'data': {'text': 'Section', 'level': 2}},
+            {'type': 'list', 'data': {'style': 'unordered', 'items': [{'content': 'One'}]}},
+            {'type': 'quote', 'data': {'text': 'Quoted', 'caption': 'Someone'}},
+            {'type': 'code', 'data': {'code': 'print(1)', 'language': 'python'}},
+            {'type': 'image', 'data': {'file': {'url': 'https://example.com/a.png'}, 'caption': 'Fig'}},
+            {'type': 'delimiter', 'data': {}},
+            {'type': 'linkTool', 'data': {'url': 'https://example.com', 'text': 'Link'}},
+        ]
+        self.assertEqual(
+            {block['type'] for block in blocks},
+            set(SUPPORTED_BLOCK_TYPES),
+            'the test fixture must cover every supported block type',
+        )
+        response = self.client.post(
+            '/api/articles/',
+            {'title': 'All blocks', 'slug': 'all-blocks', 'content': {'blocks': blocks}},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        stored = Article.objects.get(slug='all-blocks')
+        self.assertEqual(len(stored.content['blocks']), len(blocks))
