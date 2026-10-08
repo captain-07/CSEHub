@@ -125,16 +125,113 @@ function stripInlineHtml(value = '') {
     .trim();
 }
 
-function renderCodeBlock(data) {
-  const code = typeof data.code === 'string' ? data.code : '';
-  const language = data.language ? String(data.language) : '';
+/**
+ * Maps the `language` value stored on a code block to a highlight.js language
+ * name. `language` is unvalidated free text on the API and the editor only
+ * offers a fixed list, so an old or hand-written value may be absent, an
+ * alias, or something no grammar exists for.
+ *
+ * A null return means "do not highlight" — highlight.js would otherwise fall
+ * back to guessing the language from the code itself and confidently colour
+ * keywords in a language it got wrong.
+ */
+const HIGHLIGHT_LANGUAGES = {
+  python: 'python',
+  py: 'python',
+  javascript: 'javascript',
+  js: 'javascript',
+  jsx: 'javascript',
+  typescript: 'typescript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  java: 'java',
+  c: 'c',
+  cpp: 'cpp',
+  'c++': 'cpp',
+  cplusplus: 'cpp',
+  csharp: 'csharp',
+  'c#': 'csharp',
+  cs: 'csharp',
+  go: 'go',
+  golang: 'go',
+  rust: 'rust',
+  rs: 'rust',
+  sql: 'sql',
+  bash: 'bash',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  html: 'xml',
+  xml: 'xml',
+  svg: 'xml',
+  css: 'css',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+};
+
+/**
+ * Markup for a code snippet, shared by Editor.js code blocks and the
+ * `code_snippets` relation.
+ *
+ * Both storage paths exist (a block's language lives inside `Article.content`,
+ * a CodeSnippet row carries its own), so they rendered this markup separately
+ * and had to be kept in sync by hand. One function keeps them from drifting.
+ */
+export function snippetMarkup({ code = '', language = '' } = {}) {
+  const text = typeof code === 'string' ? code : '';
+  const label = typeof language === 'string' ? language.trim() : '';
+  const known = HIGHLIGHT_LANGUAGES[label.toLowerCase()] || '';
+  // The class carries the grammar, not the raw label: an unrecognised value
+  // would otherwise emit a class that no stylesheet matches.
+  const codeClass = known ? ` class="language-${escapeHtml(known)}"` : '';
   return `<section class="snippet">`
     + `<div class="snippet-bar">`
-    + `<span class="snippet-lang">${escapeHtml(language || 'code')}</span>`
-    + `<button class="copy-button" type="button" data-code="${encodeURIComponent(code)}">Copy code</button>`
+    + `<span class="snippet-lang">${escapeHtml(label || 'code')}</span>`
+    + `<button class="copy-button" type="button" data-code="${encodeURIComponent(text)}">Copy code</button>`
     + `</div>`
-    + `<pre><code>${escapeHtml(code)}</code></pre>`
+    + `<pre><code${codeClass}>${escapeHtml(text)}</code></pre>`
     + `</section>`;
+}
+
+/**
+ * Highlight every rendered snippet under `root`.
+ *
+ * Must run after the markup is in the DOM, and must tolerate highlight.js
+ * being absent: it is loaded from a CDN like Supabase and Editor.js, so a
+ * blocked or failed request should leave readable plain code rather than
+ * break the page.
+ */
+export function highlightSnippets(root = document) {
+  // Read via globalThis, not `window`: highlight.js still attaches to the
+  // window object in a browser (where they are the same), but this module is
+  // also imported under Node by the repo's editor-tool checks, where a bare
+  // `window` reference throws instead of being undefined.
+  const hljs = globalThis.hljs;
+  if (!hljs || typeof hljs.highlightElement !== 'function') return 0;
+
+  let count = 0;
+  root.querySelectorAll('.snippet pre code').forEach((el) => {
+    const requested = (el.className.match(/language-([\w+#-]+)/) || [])[1];
+    // `snippetMarkup` only emits a class for languages it recognises, so a
+    // missing one means "plain text" and the block is left alone.
+    if (!requested) return;
+    // The class comes from our own lookup table, but markup can also arrive
+    // from another source; skip rather than let highlight.js guess.
+    if (typeof hljs.getLanguage === 'function' && !hljs.getLanguage(requested)) return;
+    try {
+      hljs.highlightElement(el);
+      count += 1;
+    } catch (err) {
+      // One unparseable block must not strip highlighting from the rest.
+      console.error('Syntax highlighting failed', err);
+    }
+  });
+  return count;
+}
+
+function renderCodeBlock(data) {
+  return snippetMarkup({ code: data.code, language: data.language });
 }
 
 function renderImageBlock(data) {

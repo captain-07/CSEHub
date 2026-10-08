@@ -4,24 +4,12 @@ import { initNavbar } from './navbar.js';
 import { openChatForArticle } from './chat.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, readingTime, contentToPlainText,
+  snippetMarkup, highlightSnippets,
 } from './renderer.js';
 
 function tagsMarkup(tags = []) {
   return tags
     .map((tag) => `<a class="tag" href="articles.html?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`)
-    .join('');
-}
-
-function snippetMarkup(snippets = []) {
-  return snippets
-    .map((snippet) => `
-      <section class="snippet">
-        <div class="snippet-bar">
-          <span class="snippet-lang">${escapeHtml(snippet.language || 'code')}</span>
-          <button class="copy-button" type="button" data-code="${encodeURIComponent(snippet.code || '')}">Copy code</button>
-        </div>
-        <pre><code>${escapeHtml(snippet.code)}</code></pre>
-      </section>`)
     .join('');
 }
 
@@ -155,7 +143,9 @@ async function initArticle() {
 
           <div class="article-content">${renderArticleContent(article.content)}</div>
 
-          ${snippetMarkup(article.code_snippets)}
+          ${article.code_snippets?.length
+            ? article.code_snippets.map((snippet) => snippetMarkup(snippet)).join('')
+            : ''}
 
           <section class="article-ai-cta">
             <div class="article-ai-cta-content">
@@ -171,6 +161,7 @@ async function initArticle() {
         </article>`;
 
       bindCopyButtons(shell);
+      highlightSnippets(shell);
 
       const askAiBtn = document.querySelector('#ask-ai-cta-btn');
       if (askAiBtn) {

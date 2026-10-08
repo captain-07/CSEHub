@@ -45,7 +45,7 @@ import {
 
 
 
-import { renderArticleContent } from './frontend/js/renderer.js';
+import { renderArticleContent, snippetMarkup, highlightSnippets } from './frontend/js/renderer.js';
 
 let failures = 0;
 
@@ -275,6 +275,76 @@ check('url and text are preserved',
 check('missing text falls back to the url, matching the renderer',
   normalizeLinkBlockData({ url: 'https://example.com' }).text === 'https://example.com');
 check('a bare url string does not throw', normalizeLinkBlockData('https://example.com').url === '');
+
+section('syntax highlighting wiring (frontend/js/renderer.js)');
+// The grammar has to reach the DOM as a class, otherwise highlight.js is never
+// told what the block is and every block renders as flat white-on-black.
+check('a recognised language emits a highlight.js class',
+  /<code class="language-python">/.test(renderedCode), renderedCode.match(/<code[^>]*>/)?.[0]);
+check('a language alias resolves to the grammar it names',
+  /<code class="language-xml">/.test(renderArticleContent({ blocks: [{ type: 'code', data: { code: '<b>', language: 'html' } }] })));
+check('a language hljs does not know emits no class, so it stays plain',
+  /<code>/.test(renderArticleContent({ blocks: [{ type: 'code', data: { code: 'x', language: 'brainfuck' } }] }))
+    && !/class="language-brainfuck"/.test(renderArticleContent({ blocks: [{ type: 'code', data: { code: 'x', language: 'brainfuck' } }] })));
+check('the plain-text "code" language is not highlighted',
+  /<code>/.test(renderArticleContent({ blocks: [{ type: 'code', data: { code: 'x', language: 'code' } }] })));
+// The stored label is still shown even when it is not a grammar hljs knows.
+check('an unrecognised language is still labelled for the reader',
+  /class="snippet-lang">brainfuck</.test(renderArticleContent({ blocks: [{ type: 'code', data: { code: 'x', language: 'brainfuck' } }] })));
+
+// A CodeSnippet row carries its own language, but must produce identical markup.
+check('a CodeSnippet row renders the same markup as a stored code block',
+  snippetMarkup({ code: "print('hello')", language: 'python' }) === renderedCode
+    .replace(/^\s*/, '').replace(/<\/section>\s*$/, '</section>').trim());
+check('a CodeSnippet row with no language does not throw', /<code>/.test(snippetMarkup({ code: 'x' })));
+check('a CodeSnippet row with no code still renders an empty code element',
+  /<pre><code class="language-python"><\/code><\/pre>/.test(snippetMarkup({ language: 'python' })));
+
+// highlight.js comes from a CDN, so its absence must not break the page.
+const withHljs = (fn) => {
+  const saved = globalThis.hljs;
+  try { return fn(); } finally {
+    if (saved === undefined) delete globalThis.hljs; else globalThis.hljs = saved;
+  }
+};
+
+check('highlightSnippets is a no-op when highlight.js has not loaded',
+  withHljs(() => { delete globalThis.hljs; return highlightSnippets({ querySelectorAll: () => [] }) === 0; }));
+check('highlightSnippets tolerates a highlight.js without highlightElement',
+  withHljs(() => { globalThis.hljs = {}; return highlightSnippets({ querySelectorAll: () => [] }) === 0; }));
+check('highlightSnippets skips a block with no language class', withHljs(() => {
+  const touched = [];
+  globalThis.hljs = { getLanguage: () => true, highlightElement: (el) => touched.push(el) };
+  const nodes = [{ className: '' }, { className: 'language-python' }];
+  highlightSnippets({ querySelectorAll: () => nodes });
+  return touched.length === 1 && touched[0] === nodes[1];
+}));
+check('highlightSnippets does not hand highlight.js a language it lacks', withHljs(() => {
+  const touched = [];
+  globalThis.hljs = {
+    getLanguage: (name) => name === 'python',
+    highlightElement: (el) => touched.push(el),
+  };
+  const nodes = [{ className: 'language-madeuplang' }, { className: 'language-python' }];
+  highlightSnippets({ querySelectorAll: () => nodes });
+  return touched.length === 1 && touched[0] === nodes[1];
+}));
+check('one failing block does not stop the rest from being highlighted', withHljs(() => {
+  const savedError = console.error;
+  const touched = [];
+  globalThis.hljs = {
+    getLanguage: () => true,
+    highlightElement: (el) => {
+      touched.push(el);
+      if (touched.length === 1) throw new Error('boom');
+    },
+  };
+  console.error = () => {};
+  try {
+    const nodes = [{ className: 'language-python' }, { className: 'language-python' }];
+    return highlightSnippets({ querySelectorAll: () => nodes }) === 1 && touched.length === 2;
+  } finally { console.error = savedError; }
+}));
 
 console.log(failures === 0 ? '\nEditor tool registry: all checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

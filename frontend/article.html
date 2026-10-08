@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="css/navbar.css" />
     <link rel="stylesheet" href="css/article.css" />
+    <link rel="stylesheet" href="css/syntax.css" />
     <link rel="stylesheet" href="css/chat.css" />
   </head>
   <body>
@@ -35,6 +36,11 @@
 
     <!-- Supabase Client Library CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
+
+    <!-- Syntax highlighting for code snippets. Loaded as a classic script because
+         renderer.js reads the `window.hljs` global. highlightSnippets() no-ops when
+         this fails, so the article still renders as plain code. -->
+    <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js"></script>
     
     <!-- Load page controllers -->
     <script type="module" src="js/article.js"></script>

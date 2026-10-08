@@ -16,6 +16,7 @@
     <!-- articles.css supplies the shared .eyebrow / .empty-state / .results-heading -->
     <link rel="stylesheet" href="css/articles.css" />
     <link rel="stylesheet" href="css/article.css" />
+    <link rel="stylesheet" href="css/syntax.css" />
     <link rel="stylesheet" href="css/admin.css" />
   </head>
 
@@ -66,6 +67,12 @@
     <script src="https://cdn.jsdelivr.net/npm/@editorjs/quote@2.6.0/dist/quote.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@editorjs/delimiter@1.4.0/dist/delimiter.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@editorjs/image@2.9.3/dist/image.umd.js"></script>
+
+    <!-- Same highlight.js build as article.html, so the preview matches what
+         publishes. The local CodeBlockTool textarea is deliberately not
+         highlighted while typing: that is plain text being edited, not a
+         finished snippet. -->
+    <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js"></script>
 
     <script type="module" src="js/admin.js"></script>
   </body>

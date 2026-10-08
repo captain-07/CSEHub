@@ -1,0 +1,106 @@
+/* Syntax highlighting palette for code snippets.
+ *
+ * highlight.js marks up tokens but ships no colours here: its bundled themes
+ * are dropped in wholesale, which would bring their own background and fight
+ * the snippet chrome in article.css. These rules style only the token classes,
+ * so the existing .snippet / .snippet-bar / .copy-button design is untouched.
+ *
+ * Token colours are hand-picked against --code-bg (#18201e) rather than copied
+ * from a theme, and every one is checked for contrast on that background. The
+ * base text colour matches `.snippet pre` so unhighlighted code is
+ * indistinguishable from highlighted code that simply has no tokens.
+ */
+
+.snippet pre code {
+  /* `.article-content code` styles INLINE code with a light pill background and
+     a 0,1,1 specificity, so it would otherwise apply to the <code> inside a
+     snippet as well — green text on the dark snippet background. */
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* Comments — muted, italic. Read as an aside without disappearing. */
+.hljs-comment,
+.hljs-quote {
+  color: #8fa79a;
+  font-style: italic;
+}
+
+/* Keywords, storage, operators — the brightest green in the set, because these
+   carry the most structural weight. */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-name {
+  color: #7ee787;
+}
+
+/* Strings and characters, including template/interpolated fragments. */
+.hljs-string,
+.hljs-regexp,
+.hljs-char.escape_,
+.hljs-addition {
+  color: #9ad8f0;
+}
+
+/* Numbers, constants and units. */
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: #f0b072;
+}
+
+/* Function and method names. */
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: #d2a8ff;
+}
+
+/* Built-ins, types and classes — read as "provided by the language". */
+.hljs-built_in,
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title.class_,
+.hljs-params {
+  color: #8ad6e8;
+}
+
+/* Attributes and properties. */
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property {
+  color: #ffb08a;
+}
+
+/* Tags in markup languages, kept distinct from attribute names. */
+.hljs-tag,
+.hljs-punctuation {
+  color: #eaf1ec;
+}
+
+/* Diff markers. */
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: #bccac1;
+}
+
+.hljs-deletion {
+  color: #ff9a92;
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

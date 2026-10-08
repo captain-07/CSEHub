@@ -25,7 +25,7 @@ import {
 } from './api/articles.js';
 import { ApiError } from './api.js';
 import {
-  renderArticleContent, escapeHtml, safeUrl, formatDate, contentToPlainText,
+  renderArticleContent, escapeHtml, safeUrl, formatDate, contentToPlainText, highlightSnippets,
 } from './renderer.js';
 import {
   resolveEditorTools, assertDocumentIsEditable, UnsupportedBlocksError,
@@ -999,6 +999,10 @@ function openPreview() {
 
       document.body.appendChild(modal);
       document.body.style.overflow = 'hidden';
+
+      // The preview is rebuilt from the editor's blocks, so the snippets are
+      // fresh DOM and must be highlighted after insertion.
+      highlightSnippets(modal);
 
       const close = () => {
         modal.remove();
