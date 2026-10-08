@@ -84,7 +84,28 @@ def article_content_to_text(content) -> str:
     return '\n\n'.join(line for line in lines if line.strip())
 
 
+def purge_namespace() -> None:
+    """Delete every vector in the RAG namespace.
+
+    `ingest_article` only deletes vectors carrying its own article's
+    `article_id`, so vectors belonging to articles that were deleted from the
+    database survive forever. They are worse than dead weight: the ids get
+    reused, so a similarity search filtered on a live article can match an
+    orphan's text and the assistant answers from the wrong article — confidently
+    and wrongly.
+
+    Re-ingesting everything is therefore not enough on its own; the namespace has
+    to be emptied first. Pinecone's index has no dimension change here, only the
+    vectors go.
+    """
+    _require_rag_settings()
+    Pinecone(api_key=settings.PINECONE_API_KEY).Index(
+        settings.PINECONE_INDEX_NAME
+    ).delete(delete_all=True, namespace=NAMESPACE)
+
+
 def ingest_article(article) -> int:
+
     """
     Splits an article into chunks, generates embeddings,
     and stores them in Pinecone.

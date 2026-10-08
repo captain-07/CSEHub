@@ -316,4 +316,9 @@ SPECTACULAR_SETTINGS = {
 PINECONE_API_KEY = env('PINECONE_API_KEY', default='')
 PINECONE_INDEX_NAME = env('PINECONE_INDEX_NAME', default='')
 GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
-GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-2.5-flash-lite')
+# Chat model for the learning assistant. Google retires these aggressively: the
+# previous default, gemini-2.5-flash-lite, now answers 404 NOT_FOUND
+# ("no longer available to new users"), which surfaces as a 503 from the ask
+# endpoint. Override with GEMINI_MODEL when Google retires this one too.
+GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash-lite')
+

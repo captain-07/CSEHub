@@ -54,7 +54,7 @@ gunicorn core.wsgi:application --chdir backend --bind 0.0.0.0:${PORT:-8000}
 | App | State | Key notes |
 |-----|-------|-----------|
 | `articles` | Mature | Full ViewSet CRUD. Admin write, public read. Category/Tag/Article + CodeSnippet models. |
-| `chatbot` | Functional but has a bug | Conversation/Message models, RAG endpoints implemented. See `ingestion.py` gotcha below. |
+| `chatbot` | Functional | Conversation/Message models, RAG endpoints, `ingest_articles --purge`. See gotchas below. |
 | `users` | Functional | Custom User model, Supabase JWKS auth, `MeView` (`GET`/`PATCH /api/auth/me/`). |
 
 The `problems` app (Problem/TestCase/Submission) was **removed** — models dropped via migration, directory deleted.
@@ -69,7 +69,8 @@ The `problems` app (Problem/TestCase/Submission) was **removed** — models drop
 - Seed command (`python manage.py seed`) is idempotent (`get_or_create`).
 - No pre-commit hooks, no linting/formatting config detected.
 - No `pyproject.toml`, `setup.py`, `setup.cfg`, or `pytest.ini`.
-- **`apps/chatbot/ingestion.py` is currently broken.** `get_vectorstore()` builds a Pinecone client but never returns it, and the `return PineconeVectorStore(...)` was left inside `_require_rag_settings()`, where it references an out-of-scope `pc`. Both `ingest_article()` and `answer_question()` therefore fail at runtime; the chat endpoint silently returns its hardcoded error fallback. Fix by moving lines 31-36 back into `get_vectorstore()` with a `return`.
+- **`GEMINI_MODEL` must be a model the key can still call.** Google retires these without warning; a retired id returns `404 NOT_FOUND`, which `answer_question()` turns into a `503 chat_unavailable`, so the frontend shows "The assistant is not configured or is temporarily unavailable" for what is really a config error. Current default is `gemini-3.5-flash-lite`; the whole 2.5 line is retired. When the assistant breaks, check the model first — Pinecone and the embeddings can be fine.
+- **Re-ingesting does not clear orphaned vectors.** `ingest_article()` only deletes vectors carrying its own `article_id`, so articles deleted from the database leave vectors behind. Because ids get reused, a filtered similarity search can match an orphan and the assistant answers from the *wrong* article, confidently. Use `manage.py ingest_articles --purge` after deleting or replacing articles; it calls `purge_namespace()` and refuses to be combined with `--slug`.
 - `settings.py` uses `STATICFILES_STORAGE`, which Django 6 ignores. To make WhiteNoise's compressed-manifest storage take effect, use a `STORAGES` dict instead.
 
 ## Reserved env (needed to run)

@@ -1,5 +1,6 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APITestCase
@@ -126,3 +127,65 @@ class ContentToTextTests(TestCase):
         self.assertEqual(article_content_to_text('A plain body'), 'A plain body')
         self.assertEqual(article_content_to_text(None), '')
         self.assertEqual(article_content_to_text({'blocks': []}), '')
+
+
+class PurgeNamespaceTests(TestCase):
+    """`ingest_article` only deletes its own article's vectors.
+
+    That leaves vectors belonging to deleted articles in place, and because ids
+    get reused a filtered search can then match an orphan's text and the
+    assistant answers from the wrong article. `--purge` exists to clear them, so
+    it needs coverage: it is the one command here that destroys data.
+    """
+
+    def setUp(self):
+        from apps.chatbot import ingestion
+
+        self.ingestion = ingestion
+        self.published = Article.objects.create(
+            title='Published', slug='published', content={'blocks': []}, is_published=True
+        )
+
+    def _ingest(self, **kwargs):
+        from apps.chatbot.management.commands.ingest_articles import Command
+
+        return Command().handle(**kwargs)
+
+    def test_purge_clears_the_namespace_before_ingesting(self):
+        with patch.object(self.ingestion, 'purge_namespace') as purge, \
+                patch('apps.chatbot.management.commands.ingest_articles.ingest_article',
+                      return_value=3) as ingest, \
+                patch('apps.chatbot.management.commands.ingest_articles.purge_namespace', purge):
+            self._ingest(slug=None, purge=True)
+
+        purge.assert_called_once_with()
+        ingest.assert_called_once_with(self.published)
+
+    def test_ingestion_without_purge_leaves_the_namespace_alone(self):
+        with patch('apps.chatbot.management.commands.ingest_articles.purge_namespace') as purge, \
+                patch('apps.chatbot.management.commands.ingest_articles.ingest_article',
+                      return_value=2) as ingest:
+            self._ingest(slug=None, purge=False)
+
+        purge.assert_not_called()
+        ingest.assert_called_once_with(self.published)
+
+    def test_purge_with_slug_is_refused(self):
+        """`--purge` clears everything, so pairing it with `--slug` is a mistake."""
+        from django.core.management.base import CommandError
+
+        with patch('apps.chatbot.management.commands.ingest_articles.purge_namespace') as purge:
+            with self.assertRaises(CommandError):
+                self._ingest(slug='published', purge=True)
+
+        purge.assert_not_called()
+
+    def test_purge_uses_delete_all_for_the_configured_namespace(self):
+        with patch('apps.chatbot.ingestion.Pinecone') as pinecone:
+            index = Mock()
+            pinecone.return_value.Index.return_value = index
+            with patch.object(self.ingestion, '_require_rag_settings'):
+                self.ingestion.purge_namespace()
+
+        index.delete.assert_called_once_with(delete_all=True, namespace=self.ingestion.NAMESPACE)
+        pinecone.return_value.Index.assert_called_once_with(settings.PINECONE_INDEX_NAME)

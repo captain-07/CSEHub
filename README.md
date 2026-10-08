@@ -165,7 +165,8 @@ cp backend/.env.example backend/.env
 | `PINECONE_API_KEY`                                        | RAG only | Pinecone API key; server secret                                                                                                                |
 | `PINECONE_INDEX_NAME`                                     | RAG only | Pinecone index used for article embeddings                                                                                                     |
 | `GEMINI_API_KEY`                                          | RAG only | Google Gemini API key; server secret                                                                                                           |
-| `GEMINI_MODEL`                                            | No       | Chat model (default: `gemini-2.5-flash-lite`)                                                                                                 |
+| `GEMINI_MODEL`                                            | No       | Chat model (default: `gemini-3.5-flash-lite`)                                                                                                 |
+
 | `CORS_ALLOWED_ORIGINS`                                    | No       | Comma-separated frontend origins (default: `http://localhost:3000`)                                                                            |
 | `CSRF_TRUSTED_ORIGINS`                                    | No       | Comma-separated CSRF trusted origins (default: `http://localhost:3000`)                                                                        |
 | `DJANGO_SUPERUSER_*`                                      | No       | Auto-create superuser during `build.sh`                                                                                                        |
@@ -283,9 +284,19 @@ python backend/manage.py ingest_articles
 
 # Re-index a single article (idempotent)
 python backend/manage.py ingest_articles --slug two-sum-explained
+
+# Empty the namespace first — required after deleting or replacing articles
+python backend/manage.py ingest_articles --purge
 ```
 
 Admins can also index one article from the editor via **Update AI index**, which calls `POST /api/articles/{id}/reindex/`. Drafts are refused (`409`) — publish first.
+
+> **Why `--purge` exists.** Re-ingestion replaces an article's own vectors, keyed by
+> `article_id`. It cannot remove vectors for articles that no longer exist, and because
+> ids get reused after a delete, a similarity search filtered on a live article can match
+> an orphan's text — the assistant then answers from the *wrong* article, confidently.
+> After deleting or replacing articles, run with `--purge`. It cannot be combined with
+> `--slug`, since it clears everything.
 
 Before embedding, `article_content_to_text()` flattens the Editor.js document into readable prose: headings become `Heading: …`, code blocks become `Code (python): …`, list items become `- …`, and inline markup is stripped. The vector store therefore receives meaningful text rather than JSON syntax.
 
