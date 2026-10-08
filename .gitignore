@@ -83,7 +83,10 @@ profile_default/
 ipynb_checkpoints
 
 # pyenv
-.python-version
+# NOT ignored: Render reads .python-version to choose the Python version for the
+# deploy, so it has to be committed or the build silently falls back to 3.14 and
+# fails on packages that cap Python (langchain-pinecone requires <3.14).
+# A local pyenv install is pinned by the committed file instead.
 
 # celery beat schedule file
 celerybeat-schedule

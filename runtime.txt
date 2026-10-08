@@ -1,1 +1,5 @@
 python-3.12.10
+
+# Kept for hosts that still read this file. Render does NOT: it only honours
+# the PYTHON_VERSION environment variable or a .python-version file at the repo
+# root. See .python-version, which is what actually pins the deploy.

@@ -1,0 +1,16 @@
+# Deploy scripts must stay LF. bash cannot parse a CRLF build.sh — the `if`/`fi`
+# and heredoc lines fail with a syntax error long before anything useful runs, and
+# that happens on Render's Linux builder, not locally, which makes it very hard to
+# diagnose. `core.autocrlf=true` on a Windows checkout is enough to introduce it.
+*.sh text eol=lf
+Procfile text eol=lf
+
+# Keep Python and JS sources LF-only for the same reason: a CRLF .py or .js file
+# is valid but shows up as stray characters in the admin panel's rendered text.
+*.py text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.txt text eol=lf

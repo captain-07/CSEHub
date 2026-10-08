@@ -92,7 +92,12 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 
 ### Prerequisites
 
-- Python 3.12 (pinned for Render in `runtime.txt`)
+- Python 3.12 — pinned for Render by `.python-version` at the repo root. Render
+  does **not** read `runtime.txt`; it honours only the `PYTHON_VERSION`
+  environment variable or `.python-version`. Without the pin, Render uses 3.14
+  for services created after 2026-02-11 and the build fails, because
+  `langchain-pinecone==0.2.13` declares `Requires-Python: <3.14`.
+
 - PostgreSQL (local or remote)
 - Supabase project (JWT auth)
 - Pinecone index and Google Gemini API key (required only for ingestion and chatbot use)
