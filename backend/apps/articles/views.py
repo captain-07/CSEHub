@@ -61,35 +61,23 @@ class TagViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
 
 
 class ArticleFilterSet(FilterSet):
-    """`mine=true` narrows the listing to the requesting staff member's articles.
+    """Query filters for the article collection.
 
-    This is opt-in rather than a change to `get_queryset`, because the admin
-    panel and the public site share this endpoint. Narrowing the default
-    queryset would hide other people's published articles from a logged-in
-    editor browsing the public listing — that content is public, so hiding it
-    would be wrong.
-
-    Only ever narrows: `get_queryset` already decides what a user may see, so
-    this cannot widen the result set for anyone.
+    The admin panel's `mine=true` scope is *not* handled here. It has to widen
+    the default published-only listing back out to include the caller's own
+    drafts, and a `django-filter` filter can only ever narrow a queryset. It
+    is read by `ArticleViewSet._is_admin_listing` instead; it is declared here
+    only so it is documented and validated rather than silently ignored.
     """
 
-    mine = BooleanFilter(method='filter_mine')
+    mine = BooleanFilter(method='ignore_mine')
 
     class Meta:
         model = Article
         fields = ['category__slug', 'tags__slug', 'is_featured', 'is_published']
 
-    def filter_mine(self, queryset, name, value):
-        if not value:
-            return queryset
-        user = self.request.user
-        if not (user.is_authenticated and user.is_staff):
-            # A non-staff caller has no drafts of their own, so this reduces to
-            # the published set `get_queryset` already returned.
-            return queryset
-        if user.is_superuser:
-            return queryset
-        return queryset.filter(Q(author=user) | Q(author__isnull=True))
+    def ignore_mine(self, queryset, name, value):
+        return queryset
 
 
 class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
@@ -114,24 +102,54 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
             return ArticleListSerializer
         return ArticleDetailSerializer
 
+    def _is_admin_listing(self):
+        """True when the caller is a staff member asking for their own workspace.
+
+        `mine=true` is the admin panel's marker. It is handled here rather than
+        as a `django-filter` filter because it has to *widen* the default
+        published-only listing back to include drafts — a filter only ever
+        narrows, so it could not express this.
+        """
+        if self.action != 'list':
+            return False
+        user = self.request.user
+        if not (user and user.is_authenticated and user.is_staff):
+            return False
+        return self.request.query_params.get('mine', '').lower() in ('1', 'true', 'yes')
+
     def get_queryset(self):
         queryset = Article.objects.select_related('category', 'author').prefetch_related(
             'tags', 'code_snippets'
         )
         user = self.request.user
-        if not (user.is_authenticated and user.is_staff):
-            # Everyone else sees published work only, whoever wrote it.
+
+        # Listings are published-only for everyone, including staff and
+        # superusers. Drafts belong to the admin panel only: the home page,
+        # the article index and the "keep learning" rail all read from this
+        # endpoint, and an editor browsing them should see what a reader sees.
+        # The scope is decided here rather than at each call site so a new
+        # public listing cannot forget the filter and leak drafts.
+        if self._is_admin_listing():
+            if user.is_superuser:
+                return queryset.distinct()
+            # `author=None` is included so content imported or seeded without an
+            # author is not stranded, invisible to everyone.
+            return queryset.filter(Q(author=user) | Q(author__isnull=True)).distinct()
+
+        if self.action == 'list':
             return queryset.filter(is_published=True).distinct()
 
-        # Staff see everything already published — that content is public, and
-        # hiding colleagues' published work would just look broken — plus their
-        # own drafts. `author=None` is included so content imported or seeded
-        # without an author is not stranded, invisible to everyone.
-        if user.is_superuser:
-            return queryset.distinct()
-        return queryset.filter(
-            Q(author=user) | Q(author__isnull=True) | Q(is_published=True)
-        ).distinct()
+        # Direct retrieval and writes still resolve a staff member's own draft:
+        # the admin editor has to open one to keep working on it. This is scoped
+        # to their own content by `IsAuthorOrReadOnly` on writes.
+        if user.is_authenticated and user.is_staff:
+            if user.is_superuser:
+                return queryset.distinct()
+            return queryset.filter(
+                Q(author=user) | Q(author__isnull=True) | Q(is_published=True)
+            ).distinct()
+
+        return queryset.filter(is_published=True).distinct()
 
     lookup_field = 'slug'
     lookup_value_regex = '[^/]+'

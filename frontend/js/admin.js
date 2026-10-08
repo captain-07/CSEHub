@@ -59,6 +59,60 @@ function destroyEditor() {
   editor = null;
 }
 
+/* --------------------------------------------------- unsaved-changes guard */
+
+/**
+ * The article editor holds unsaved work in two places: the form inputs and the
+ * Editor.js instance. Losing either is silent — `app.innerHTML` wipes the DOM
+ * and the editor's data with it — so both have to mark the view dirty.
+ */
+let formIsDirty = false;
+
+function markClean() {
+  formIsDirty = false;
+}
+
+function isDirty() {
+  return formIsDirty;
+}
+
+/** Watches the form for input after the editor is built. */
+function watchFormForChanges(form) {
+  form.addEventListener('input', () => {
+    formIsDirty = true;
+  });
+  form.addEventListener('change', () => {
+    formIsDirty = true;
+  });
+}
+
+/** Warn before a reload or tab close discards the article. */
+function installUnloadGuard() {
+  window.addEventListener('beforeunload', (event) => {
+    if (!isDirty()) return undefined;
+    event.preventDefault();
+    // Browsers show their own wording; a non-empty return value is what opts in.
+    event.returnValue = '';
+    return '';
+  });
+}
+
+/**
+ * Asks before an in-app route change discards the article.
+ *
+ * `beforeunload` covers reloads and closing the tab but says nothing about
+ * clicking "← All articles", which is an ordinary thing to do mid-edit.
+ */
+async function confirmDiscard() {
+  if (!isDirty()) return true;
+  return confirmAction({
+    title: 'Discard unsaved changes?',
+    message: 'This article has changes that have not been saved. Leaving this page will lose them.',
+    confirmLabel: 'Discard changes',
+    destructive: true,
+  });
+}
+
 /**
  * Renders a status line, optionally as a bulleted list of offending block types.
  * Items are escaped, so this is safe for the tool names reported by the guard.
@@ -167,6 +221,15 @@ async function notify(title, message, kind = 'info') {
  * Resolves the current view from the hash. Unknown routes fall back to the
  * dashboard so a stale bookmark never renders a blank panel.
  */
+/**
+ * Resets the current view from the hash. Unknown routes fall back to the
+ * dashboard so a stale bookmark never renders a blank panel.
+ *
+ * Leaving the article form is the one transition that can discard work, so it
+ * asks first. The hash is restored when the author cancels: setting it has
+ * already fired `hashchange`, so the route has to be put back or the panel is
+ * left showing the dashboard behind a URL that claims otherwise.
+ */
 function parseRoute() {
   const path = window.location.hash.replace(/^#\/?/, '');
   const segments = path.split('/').filter(Boolean);
@@ -183,14 +246,6 @@ function parseRoute() {
   return { view: 'dashboard' };
 }
 
-function navigate(hash) {
-  if (window.location.hash === hash) {
-    renderRoute();
-    return;
-  }
-  window.location.hash = hash;
-}
-
 let currentRoute = null;
 
 /** Guards against a slow request for a view the user has already navigated away from. */
@@ -198,9 +253,20 @@ function routeIsCurrent(route) {
   return currentRoute === route;
 }
 
+/** True when both routes address the same article form (possibly re-entered). */
+function isSameForm(a, b) {
+  return a.view === 'article-form' && b.view === 'article-form' && (a.id ?? null) === (b.id ?? null);
+}
+
 async function renderRoute() {
   const route = parseRoute();
   currentRoute = `${route.view}:${route.id ?? ''}`;
+
+  // Every view replaces `#admin-app`, so the editor instance has to be released
+  // here rather than in each renderer. Previously only the taxonomy and form
+  // views tore it down, and navigating form → articles left a live Editor.js
+  // pointing at a detached DOM node.
+  if (route.view !== 'article-form') destroyEditor();
 
   const renderers = {
     dashboard: renderDashboard,
@@ -211,6 +277,16 @@ async function renderRoute() {
 
   const render = renderers[route.view] || renderDashboard;
   await render();
+}
+
+/** Used after a save, where the document on screen matches the server again. */
+function navigate(hash) {
+  markClean();
+  if (window.location.hash === hash) {
+    renderRoute();
+    return;
+  }
+  window.location.hash = hash;
 }
 
 /* ---------------------------------------------------------- data helpers */
@@ -793,6 +869,10 @@ function buildEditor(initialData) {
     data: initialData,
     placeholder: 'Write the lesson…',
     tools: toolStatus.tools,
+    // Typing in the body has to count as unsaved work just like editing a field.
+    onChange: () => {
+      formIsDirty = true;
+    },
   });
 }
 
@@ -831,6 +911,11 @@ function reportBlockedSave(blockTypes) {
 async function renderArticleForm(id) {
   const route = currentRoute;
   destroyEditor();
+  // A freshly loaded article matches what is on the server, so there is nothing
+  // to warn about until the author changes something. Resetting here (rather
+  // than only marking clean after a save) means a failed save keeps the guard
+  // armed, which is the case where losing work would hurt most.
+  markClean();
   app.innerHTML = loadingMarkup(id ? 'Loading article…' : 'Preparing editor…');
   statusMessage('');
 
@@ -872,7 +957,9 @@ async function renderArticleForm(id) {
       );
     }
 
-    document.querySelector('#article-form').addEventListener('submit', (event) => saveArticle(event, article));
+    const form = document.querySelector('#article-form');
+    form.addEventListener('submit', (event) => saveArticle(event, article));
+    watchFormForChanges(form);
     document.querySelector('#preview-btn').addEventListener('click', openPreview);
 
     const reindexBtn = document.querySelector('#reindex-btn');
@@ -1038,8 +1125,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!window.location.hash) window.location.hash = '#/';
   await renderRoute();
 
-  // `hashchange` covers back/forward and in-app anchor navigation alike.
-  window.addEventListener('hashchange', () => {
-    renderRoute();
+  // The route as it was *before* a `hashchange`, since `parseRoute` can only
+  // report the destination once the hash has already changed.
+  let leavingFrom = parseRoute();
+
+  installUnloadGuard();
+
+  // `hashchange` covers in-app anchor clicks and browser back/forward alike,
+  // which is where the unsaved-changes prompt belongs: `beforeunload` never
+  // fires for a hash change.
+  window.addEventListener('hashchange', async () => {
+    const next = parseRoute();
+
+    // Only prompt when the author is actually leaving the article they loaded,
+    // so re-entering the same form does not raise a false alarm.
+    if (leavingFrom.view === 'article-form' && !isSameForm(leavingFrom, next)) {
+      const discard = await confirmDiscard();
+      if (!discard) {
+        // Restoring the hash fires this handler again; the form was never
+        // re-rendered, so the guard is now inert and it renders straight back.
+        window.location.hash = leavingFrom.id === null
+          ? '#/articles/new'
+          : `#/articles/${leavingFrom.id}/edit`;
+        return;
+      }
+      markClean();
+    }
+
+    leavingFrom = next;
+    await renderRoute();
   });
 });

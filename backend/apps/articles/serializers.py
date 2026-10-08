@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.text import slugify
+from drf_spectacular.utils import extend_schema_field
 
 from .models import Category, Tag, Article, CodeSnippet, SUPPORTED_BLOCK_TYPES
 
@@ -55,6 +56,7 @@ class ArticleListSerializer(serializers.ModelSerializer):
                   'author_name', 'author_email',
                   'is_published', 'is_featured', 'created_at', 'updated_at']
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
         return article_author_name(article)
 
@@ -74,6 +76,7 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
             'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
         return article_author_name(article)
 

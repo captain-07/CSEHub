@@ -1,6 +1,6 @@
 import { initNavbar } from './navbar.js';
 import { initAuth, getAuthState, subscribeAuth } from './auth-state.js';
-import { loginWithGoogle } from './auth.js';
+import { loginWithGoogle, sanitizeRedirect } from './auth.js';
 import { escapeHtml } from './renderer.js';
 
 const googleBtn = document.querySelector('#google-btn');
@@ -22,9 +22,17 @@ function clearAlert() {
 function redirectIfSignedIn() {
   const { user, ready } = getAuthState();
   if (!ready || !user) return false;
+
+  // `sanitizeRedirect` is the single validation for a post-login destination.
+  // A local regex was previously used here that accepted only a bare filename,
+  // so `/article.html?slug=hash-tables` — the exact shape api.js and chat.js
+  // produce — was rejected and the reader landed on the home page instead.
+  //
+  // The OAuth callback does not come back here: Supabase returns to index.html
+  // and `auth-state.js` replays the pending destination from sessionStorage.
   const params = new URLSearchParams(window.location.search);
-  const target = params.get('redirect');
-  window.location.replace(target && /^[a-z0-9.-]+\.html$/i.test(target) ? target : 'index.html');
+  const target = sanitizeRedirect(params.get('redirect'));
+  window.location.replace(target || 'index.html');
   return true;
 }
 

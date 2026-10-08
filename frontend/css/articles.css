@@ -472,6 +472,11 @@
   margin: 0;
 }
 
+/* Shown when the count request failed and the real number is unknown. */
+.category-count-unknown {
+  color: var(--text-secondary);
+}
+
 .category-link {
   padding: var(--space-2xs) var(--space-xs);
   font-weight: 700;

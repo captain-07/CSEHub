@@ -10,6 +10,19 @@ function plural(count, singular, pluralForm) {
 }
 
 /**
+ * The per-card count line.
+ *
+ * `counts === null` means the tally never arrived, which is not the same as a
+ * category holding no articles. Saying "0 articles" there states something the
+ * page does not know, so an em dash is shown instead of a fabricated zero.
+ */
+function countMarkup(counts, categoryId) {
+  if (counts === null) return '<p class="category-count category-count-unknown">—</p>';
+  const count = counts.get(categoryId) || 0;
+  return `<p class="category-count">${escapeHtml(plural(count, 'article', 'articles'))}</p>`;
+}
+
+/**
  * Renders the category grid, with the article count for each category.
  *
  * The counts need the whole library, so the full paginated collection is fetched
@@ -29,7 +42,10 @@ async function loadCategories() {
       return;
     }
 
-    let counts = new Map();
+    // `null`, not an empty Map: a failed count request has to be
+    // distinguishable from a genuine zero, or every category reads "0 articles"
+    // as though it were true. See `countMarkup`.
+    let counts = null;
     try {
       const articles = await getAllPages('/articles/?ordering=-created_at&is_published=true');
       counts = new Map();
@@ -38,20 +54,18 @@ async function loadCategories() {
         if (id) counts.set(id, (counts.get(id) || 0) + 1);
       });
     } catch (error) {
-      // Counts are supplementary: without them the grid is still useful.
+      // Counts are supplementary: the grid is still useful without them, but it
+      // must not state a number it does not have.
       console.warn('Article counts unavailable', error);
     }
 
     grid.innerHTML = categories
-      .map((category) => {
-        const count = counts.get(category.id) || 0;
-        return `
+      .map((category) => `
           <a class="category-card" href="articles.html?category=${encodeURIComponent(category.slug)}">
             <h2>${escapeHtml(category.name)}</h2>
-            <p class="category-count">${escapeHtml(plural(count, 'article', 'articles'))}</p>
+            ${countMarkup(counts, category.id)}
             <span class="text-link">Browse →</span>
-          </a>`;
-      })
+          </a>`)
       .join('');
   } catch (error) {
     grid.innerHTML = messageStateMarkup({

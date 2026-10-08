@@ -161,16 +161,53 @@ class ArticleAPITests(APITestCase):
         self.draft.refresh_from_db()
         self.assertEqual(self.draft.title, 'Draft')
 
-    def test_staff_sees_their_own_drafts_but_not_another_authors_draft(self):
-        other = get_user_model().objects.create_user(
-            email='other-staff@example.com', username='other-staff', is_staff=True
-        )
-        self.draft.author = other
+    def test_public_listing_hides_drafts_from_everyone_including_staff(self):
+        """The home page, the article index and the "keep learning" rail all read
+        this endpoint. An editor browsing them should see exactly what a reader
+        sees, so their own drafts must not appear."""
+        self.draft.author = self.staff
         self.draft.save()
+
         self.client.force_authenticate(self.staff)
         slugs = [item['slug'] for item in self.client.get('/api/articles/').data['results']]
         self.assertIn('public', slugs)
         self.assertNotIn('draft', slugs)
+
+    def test_admin_listing_still_returns_the_callers_own_draft(self):
+        """The scope is what the panel opts into; the public listing losing drafts
+        must not cost the editor access to their own work."""
+        self.draft.author = self.staff
+        self.draft.save()
+
+        self.client.force_authenticate(self.staff)
+        slugs = [
+            item['slug']
+            for item in self.client.get('/api/articles/?mine=true').data['results']
+        ]
+        self.assertIn('draft', slugs)
+
+    def test_superuser_public_listing_is_published_only(self):
+        """Superuser bypasses the ownership rule, not the published-only rule."""
+        root = get_user_model().objects.create_superuser(
+            email='root@example.com', username='root', password='password'
+        )
+        self.draft.author = root
+        self.draft.save()
+
+        self.client.force_authenticate(root)
+        slugs = [item['slug'] for item in self.client.get('/api/articles/').data['results']]
+        self.assertNotIn('draft', slugs)
+
+    def test_admin_can_still_open_their_own_draft_by_slug(self):
+        """Direct retrieval is not the public listing, so the editor keeps the
+        ability to open a draft and keep writing it."""
+        self.draft.author = self.staff
+        self.draft.save()
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.get(f'/api/articles/{self.draft.slug}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['slug'], 'draft')
 
     def test_staff_sees_another_authors_published_article_read_only(self):
         other = get_user_model().objects.create_user(
@@ -302,8 +339,10 @@ class ArticleAPITests(APITestCase):
     def test_is_published_can_be_filtered_for_staff(self):
         """The admin list filters by status, so both truthy and falsy forms work.
 
-        Without a staff user the draft is hidden by `get_queryset` regardless of
-        the filter, which would make a broken `false` value look correct.
+        `mine=true` is required for the falsy forms: drafts only exist inside
+        the admin panel's own-articles scope. Without a staff user the draft is
+        hidden by `get_queryset` regardless of the filter, which would make a
+        broken `false` value look correct.
         """
         self.client.force_authenticate(self.staff)
         for value, expected in (
@@ -313,7 +352,7 @@ class ArticleAPITests(APITestCase):
             ('0', {'draft'}),
         ):
             with self.subTest(is_published=value):
-                response = self.client.get(f'/api/articles/?is_published={value}')
+                response = self.client.get(f'/api/articles/?mine=true&is_published={value}')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(
                     {item['slug'] for item in response.data['results']},
