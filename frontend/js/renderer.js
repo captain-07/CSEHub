@@ -298,6 +298,9 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   const href = `article.html?slug=${encodeURIComponent(slugOrId)}`;
   const image = safeUrl(article.featured_image);
   const summary = article.excerpt || '';
+  // `author_name` is null for unattributed articles, so the byline is omitted
+  // rather than rendered as a dangling separator.
+  const authorName = (article.author_name || '').trim();
 
   return `
     <article class="article-card${featured ? ' article-card-featured' : ''}">
@@ -312,6 +315,7 @@ export function articleCardMarkup(article, { featured = false } = {}) {
           ${featured ? '<span class="badge">Featured</span>' : ''}
         </p>
         <h3><a href="${href}">${escapeHtml(article.title)}</a></h3>
+        ${authorName ? `<p class="card-byline">By ${escapeHtml(authorName)}</p>` : ''}
         ${summary ? `<p>${escapeHtml(summary)}</p>` : ''}
         <a class="text-link" href="${href}">Read article →</a>
       </div>

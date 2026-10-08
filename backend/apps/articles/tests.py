@@ -1,4 +1,8 @@
+from io import StringIO
+
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.test import TestCase
 
 from rest_framework.test import APITestCase
 
@@ -172,6 +176,46 @@ class ArticleAPITests(APITestCase):
             self.client.post(f'/api/articles/{self.draft.pk}/reindex/').status_code, 409
         )
 
+    def test_list_endpoint_exposes_author_name(self):
+        """Cards are built from the list endpoint, so a byline missing here means
+        no article grid can ever show an author."""
+        self.staff.display_name = 'Debjyoti Saha'
+        self.staff.save()
+        self.published.author = self.staff
+        self.published.save()
+
+        response = self.client.get('/api/articles/')
+        self.assertEqual(response.status_code, 200)
+        item = next(r for r in response.data['results'] if r['slug'] == 'public')
+        self.assertEqual(item['author_name'], 'Debjyoti Saha')
+        self.assertEqual(item['author_email'], 'staff@example.com')
+
+    def test_list_endpoint_tolerates_an_unattributed_article(self):
+        """Article.author is nullable, so seeded and imported rows may have none."""
+        response = self.client.get('/api/articles/')
+        self.assertEqual(response.status_code, 200)
+        item = next(r for r in response.data['results'] if r['slug'] == 'public')
+        self.assertIsNone(item['author_name'])
+        self.assertIsNone(item['author_email'])
+
+    def test_staff_can_reassign_the_author(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.patch(
+            f'/api/articles/{self.published.pk}/', {'author': self.user.pk}, format='json'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.published.refresh_from_db()
+        self.assertEqual(self.published.author, self.user)
+
+    def test_non_staff_cannot_reassign_the_author(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.patch(
+            f'/api/articles/{self.published.pk}/', {'author': self.user.pk}, format='json'
+        )
+        self.assertEqual(response.status_code, 403)
+        self.published.refresh_from_db()
+        self.assertIsNone(self.published.author)
+
     def test_detail_exposes_author_name_without_requiring_the_client_to_derive_it(self):
         self.staff.display_name = 'Debjyoti Saha'
         self.staff.save()
@@ -214,3 +258,46 @@ class ArticleAPITests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         stored = Article.objects.get(slug='all-blocks')
         self.assertEqual(len(stored.content['blocks']), len(blocks))
+
+
+class SeedAuthorTests(TestCase):
+    """`build.sh` runs `manage.py seed` on every deploy, so unattributed seed
+    content ships a site where no article shows an author."""
+
+    def call_seed(self):
+        call_command('seed', stdout=StringIO(), stderr=StringIO())
+
+    def test_seeded_articles_carry_a_byline(self):
+        self.call_seed()
+        articles = Article.objects.all()
+        self.assertTrue(articles.exists())
+        for article in articles:
+            self.assertIsNotNone(
+                article.author, f'seeded article {article.slug} has no author'
+            )
+
+    def test_reseeding_backfills_seeded_articles_that_predate_the_author_column(self):
+        """An older deploy seeded content with a null author, so the first run
+        after this change must repair those rows, not just brand-new ones."""
+        Article.objects.create(
+            title='Two Sum — Explained', slug='two-sum-explained',
+            content={'blocks': []}, is_published=True,
+        )
+
+        self.call_seed()
+
+        self.assertIsNotNone(Article.objects.get(slug='two-sum-explained').author)
+
+    def test_reseeding_does_not_overwrite_an_author_assigned_later(self):
+        self.call_seed()
+        article = Article.objects.get(slug='two-sum-explained')
+        editor = get_user_model().objects.create_user(
+            email='editor@example.com', username='editor', is_staff=True
+        )
+        article.author = editor
+        article.save(update_fields=['author'])
+
+        self.call_seed()
+
+        article.refresh_from_db()
+        self.assertEqual(article.author, editor)

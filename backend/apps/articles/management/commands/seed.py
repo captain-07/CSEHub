@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from apps.articles.models import Category, Tag, Article, ArticleTag, CodeSnippet
 
@@ -512,7 +513,7 @@ ORDER BY slug;'''),
 class Command(BaseCommand):
     help = 'Seed database with sample data'
 
-    def handle(self, *args, **kwargs):
+    def handle(self, *args, **options):
         self.stdout.write('Seeding categories...')
         cats = {}
         for name, slug in [
@@ -530,14 +531,43 @@ class Command(BaseCommand):
             t, _ = Tag.objects.get_or_create(name=name, slug=name)
             tags[name] = t
 
+        # Every article below needs an author or it renders with no byline at
+        # all, so a placeholder byline is created before any content is written.
+        author = self.get_site_author()
+
         self.stdout.write('Seeding articles...')
-        self.seed_walkthrough(cats, tags)
+        self.seed_walkthrough(cats, tags, author)
         for spec in ARTICLES:
-            self.seed_article(spec, cats, tags)
+            self.seed_article(spec, cats, tags, author)
 
         self.stdout.write(self.style.SUCCESS('Seed complete.'))
 
-    def seed_article(self, spec, cats, tags):
+    def get_site_author(self):
+        """Return the user that sample content is attributed to.
+
+        Article.author is nullable, so seeding without one silently produces a
+        site whose every article shows no byline. Real signups arrive through
+        Supabase, so the seed cannot rely on an existing account: it falls back
+        to a dedicated placeholder rather than borrowing whichever staff user
+        happens to exist first.
+        """
+        User = get_user_model()
+        author, created = User.objects.get_or_create(
+            username='csehub',
+            defaults={
+                'email': 'author@csehub.local',
+                'display_name': 'CSEHub',
+                'is_staff': True,
+                'is_active': True,
+            },
+        )
+        if created:
+            author.set_unusable_password()
+            author.save(update_fields=['password'])
+            self.stdout.write('Created placeholder author "CSEHub".')
+        return author
+
+    def seed_article(self, spec, cats, tags, author):
         # get_or_create on slug only: re-running never overwrites an author's edits.
         article, created = Article.objects.get_or_create(
             slug=spec['slug'],
@@ -546,18 +576,25 @@ class Command(BaseCommand):
                 'excerpt': spec['excerpt'],
                 'content': spec['content'],
                 'category': cats[spec['category']],
+                'author': author,
                 'is_published': spec['is_published'],
                 'is_featured': spec['is_featured'],
             },
         )
         if not created:
+            # Backfill rows seeded before `author` was populated. Restricted to
+            # the NULL case so a byline assigned later through the admin panel
+            # survives a re-seed.
+            if article.author_id is None:
+                article.author = author
+                article.save(update_fields=['author'])
             return article
 
         for tag_slug in spec['tags']:
             ArticleTag.objects.get_or_create(article=article, tag=tags[tag_slug])
         return article
 
-    def seed_walkthrough(self, cats, tags):
+    def seed_walkthrough(self, cats, tags, author):
         article, created = Article.objects.get_or_create(
             slug='two-sum-explained',
             defaults={
@@ -575,9 +612,15 @@ class Command(BaseCommand):
                 ),
                 'excerpt': 'A hashmap-based walkthrough of the classic Two Sum problem.',
                 'category': cats['dsa'],
+                'author': author,
                 'is_published': True,
             }
         )
+        if not created:
+            if article.author_id is None:
+                article.author = author
+                article.save(update_fields=['author'])
+            return
         if created:
             ArticleTag.objects.get_or_create(article=article, tag=tags['array'])
             ArticleTag.objects.get_or_create(article=article, tag=tags['dp'])

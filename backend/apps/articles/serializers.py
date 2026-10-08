@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.text import slugify
 
@@ -23,14 +24,39 @@ class CodeSnippetSerializer(serializers.ModelSerializer):
         fields = ['language', 'code', 'order']
 
 
+def article_author_name(article):
+    """Public byline for an article, or None when it has no author.
+
+    The name is always derived server-side: `display_name` when the author set
+    one, otherwise the username, and only as a last resort the email. The FK is
+    nullable, so every consumer must tolerate a null byline.
+    """
+    author = article.author
+    if not author:
+        return None
+    return author.display_name or author.username or author.email
+
+
+# Both read serializers expose the byline. Cards are built from the *list*
+# endpoint, so restricting it to the detail serializer silently guarantees that
+# article grids can never show an author regardless of what the database holds.
+# The fields are repeated rather than mixed in because DRF's metaclass only
+# collects declared fields from classes it built, so a plain mixin contributes
+# nothing and `author_name` would be treated as a model field.
 class ArticleListSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     tags = TagSerializer(many=True, read_only=True)
+    author_email = serializers.EmailField(source='author.email', read_only=True, default=None)
+    author_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
         fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'category', 'tags',
+                  'author_name', 'author_email',
                   'is_published', 'is_featured', 'created_at', 'updated_at']
+
+    def get_author_name(self, article):
+        return article_author_name(article)
 
 
 class ArticleDetailSerializer(serializers.ModelSerializer):
@@ -38,8 +64,6 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, read_only=True)
     code_snippets = CodeSnippetSerializer(many=True, read_only=True)
     author_email = serializers.EmailField(source='author.email', read_only=True, default=None)
-    # Public bylines show a display name; the raw email stays available for the
-    # admin panel but is not what visitors see.
     author_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -51,10 +75,7 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_author_name(self, article):
-        author = article.author
-        if not author:
-            return None
-        return author.display_name or author.username or author.email
+        return article_author_name(article)
 
 
 class ArticleWriteSerializer(serializers.ModelSerializer):
@@ -68,12 +89,18 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
     )
     code_snippets = CodeSnippetSerializer(many=True, required=False)
     slug = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    # Write-only from the public side: `perform_create` already sets the author
+    # to the requesting staff user, so this exists to let an admin reassign a
+    # byline on content that predates that behaviour (or was seeded).
+    author = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.all(), required=False, allow_null=True
+    )
 
     class Meta:
         model = Article
         fields = [
             'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category', 'tags',
-            'code_snippets', 'is_published', 'is_featured', 'created_at', 'updated_at',
+            'code_snippets', 'author', 'is_published', 'is_featured', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 

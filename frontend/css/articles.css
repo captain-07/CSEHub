@@ -380,11 +380,22 @@
   color: var(--accent);
 }
 
-.article-card-body > p:not(.card-meta) {
+.article-card-body > p:not(.card-meta):not(.card-byline) {
   color: var(--text-secondary);
   font-size: var(--text-sm);
   margin: 0;
   flex: 1;
+}
+
+/* Byline sits under the title, above the excerpt. Excluded from the generic
+   body-paragraph rule above so it does not stretch to fill the card. */
+.card-byline {
+  display: block;
+  margin: 0 0 0.5rem 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  flex: 0 0 auto;
 }
 
 .article-card-media {

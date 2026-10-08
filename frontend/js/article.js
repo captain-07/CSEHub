@@ -69,6 +69,7 @@ function relatedMarkup(related) {
             <h3>${escapeHtml(item.title)}</h3>
             ${item.excerpt ? `<p>${escapeHtml(item.excerpt)}</p>` : ''}
             <span class="card-meta">${item.category ? escapeHtml(item.category.name) : 'General'} · ${escapeHtml(formatDate(item.created_at))}</span>
+            ${item.author_name ? `<span class="card-byline">By ${escapeHtml(item.author_name)}</span>` : ''}
           </a>`
           )
           .join('')}
