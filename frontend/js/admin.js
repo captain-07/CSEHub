@@ -280,6 +280,10 @@ function adminNav(active) {
  * The listing endpoint is paginated, so the totals come from a full scan of the
  * collection rather than from one page of results — a dashboard that reports
  * "24 articles" when there are 240 is worse than no dashboard.
+ *
+ * `mine: true` scopes the panel to the signed-in editor's own articles. The
+ * server enforces per-author writes, so listing other people's published work
+ * here would offer Edit and Delete buttons that always fail.
  */
 async function fetchAllArticles() {
   const collected = [];
@@ -287,7 +291,7 @@ async function fetchAllArticles() {
   let total = 0;
 
   for (let guard = 0; guard < 25; guard += 1) {
-    const payload = normalizePage(await getArticles({ page, ordering: '-created_at' }));
+    const payload = normalizePage(await getArticles({ page, ordering: '-created_at', mine: true }));
     collected.push(...payload.results);
     total = payload.count;
     if (!payload.next || payload.results.length === 0) break;
@@ -504,7 +508,7 @@ async function renderArticleList() {
   app.innerHTML = loadingMarkup('Loading articles…');
 
   try {
-    const filters = { page: state.page, ordering: '-created_at' };
+    const filters = { page: state.page, ordering: '-created_at', mine: true };
     if (state.search) filters.search = state.search;
     if (state.status) filters.is_published = state.status === 'published' ? 'true' : 'false';
 

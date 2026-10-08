@@ -59,6 +59,70 @@ class ArticleAPITests(APITestCase):
         self.assertEqual(self.client.patch(f'/api/articles/{article.pk}/', {'is_published': True}, format='json').status_code, 200)
         self.assertEqual(self.client.delete(f'/api/articles/{article.pk}/').status_code, 204)
 
+    def test_mine_filter_narrows_the_admin_list_to_their_own_articles(self):
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.published.author = other
+        self.published.save()
+        self.draft.author = self.staff
+        self.draft.save()
+
+        self.client.force_authenticate(self.staff)
+        slugs = [
+            item['slug']
+            for item in self.client.get('/api/articles/?mine=true').data['results']
+        ]
+        self.assertIn('draft', slugs)
+        self.assertNotIn('public', slugs)
+
+    def test_mine_filter_does_not_hide_published_articles_from_the_public_site(self):
+        """The admin panel and the public listing share this endpoint."""
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.published.author = other
+        self.published.save()
+
+        self.client.force_authenticate(self.staff)
+        slugs = [item['slug'] for item in self.client.get('/api/articles/').data['results']]
+        self.assertIn('public', slugs)
+
+    def test_mine_filter_is_ignored_for_a_non_staff_caller(self):
+        """It must never widen what `get_queryset` already permits."""
+        self.published.author = self.staff
+        self.published.save()
+        self.draft.author = None
+        self.draft.save()
+
+        slugs = [item['slug'] for item in self.client.get('/api/articles/?mine=true').data['results']]
+        self.assertEqual(slugs, ['public'])
+
+    def test_mine_filter_is_ignored_for_a_superuser(self):
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.published.author = other
+        self.published.save()
+        root = get_user_model().objects.create_superuser(
+            email='root@example.com', username='root', password='password'
+        )
+        self.client.force_authenticate(root)
+        slugs = [
+            item['slug'] for item in self.client.get('/api/articles/?mine=true').data['results']
+        ]
+        self.assertIn('public', slugs)
+
+    def test_mine_filter_still_hides_other_authors_drafts(self):
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.draft.author = other
+        self.draft.save()
+        self.client.force_authenticate(self.staff)
+        slugs = [item['slug'] for item in self.client.get('/api/articles/?mine=true').data['results']]
+        self.assertNotIn('draft', slugs)
+
     def test_staff_cannot_see_or_edit_another_authors_article(self):
         """Write access is per-author, not merely 'is staff'."""
         other = get_user_model().objects.create_user(

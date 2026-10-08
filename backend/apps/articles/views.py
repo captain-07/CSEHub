@@ -6,6 +6,7 @@ from rest_framework import status
 from django.db.models import Q
 from django.http import Http404
 from django_filters.rest_framework import DjangoFilterBackend
+from django_filters.rest_framework.filterset import BooleanFilter, FilterSet
 from apps.chatbot.ingestion import ingest_article
 from .models import Category, Tag, Article
 from .permissions import IsAuthorOrReadOnly
@@ -59,6 +60,38 @@ class TagViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     lookup_field = 'pk'
 
 
+class ArticleFilterSet(FilterSet):
+    """`mine=true` narrows the listing to the requesting staff member's articles.
+
+    This is opt-in rather than a change to `get_queryset`, because the admin
+    panel and the public site share this endpoint. Narrowing the default
+    queryset would hide other people's published articles from a logged-in
+    editor browsing the public listing — that content is public, so hiding it
+    would be wrong.
+
+    Only ever narrows: `get_queryset` already decides what a user may see, so
+    this cannot widen the result set for anyone.
+    """
+
+    mine = BooleanFilter(method='filter_mine')
+
+    class Meta:
+        model = Article
+        fields = ['category__slug', 'tags__slug', 'is_featured', 'is_published']
+
+    def filter_mine(self, queryset, name, value):
+        if not value:
+            return queryset
+        user = self.request.user
+        if not (user.is_authenticated and user.is_staff):
+            # A non-staff caller has no drafts of their own, so this reduces to
+            # the published set `get_queryset` already returned.
+            return queryset
+        if user.is_superuser:
+            return queryset
+        return queryset.filter(Q(author=user) | Q(author__isnull=True))
+
+
 class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     ADMIN_ACTIONS = AdminWriteOrReadAnyMixin.ADMIN_ACTIONS + ('reindex',)
     # Opt in to the author check, since the mixin is also used by Category and
@@ -69,7 +102,7 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     # `is_published` is exposed so the admin list can filter by status. It is safe
     # to expose publicly because `get_queryset` already hides drafts from anyone
     # who is not staff, so the filter can only ever narrow an already-filtered set.
-    filterset_fields = ['category__slug', 'tags__slug', 'is_featured', 'is_published']
+    filterset_class = ArticleFilterSet
     search_fields = ['title', 'excerpt']
     ordering_fields = ['created_at', 'title']
     ordering = ['-created_at']
