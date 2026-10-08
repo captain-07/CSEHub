@@ -89,9 +89,11 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
     )
     code_snippets = CodeSnippetSerializer(many=True, required=False)
     slug = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    # Write-only from the public side: `perform_create` already sets the author
-    # to the requesting staff user, so this exists to let an admin reassign a
-    # byline on content that predates that behaviour (or was seeded).
+    # Gated by `_reject_author_reassignment`: a plain admin sending this is
+    # refused, because writes are scoped to the article's own author and a
+    # writable `author` would otherwise let any admin PATCH someone else's
+    # article to reassign it to themselves and thereby acquire write access.
+    # Only a superuser may reassign.
     author = serializers.PrimaryKeyRelatedField(
         queryset=get_user_model().objects.all(), required=False, allow_null=True
     )
@@ -110,12 +112,29 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Each code snippet must have a unique order.')
         return snippets
 
+    def _reject_author_reassignment(self):
+        """Refuse a client-supplied `author` unless a superuser sent it.
+
+        The field is read-only, so DRF would silently drop the value and report
+        a 200 while the byline never changed. That is the worst outcome: an
+        editor who believes they handed an article to a colleague has not.
+        """
+        if 'author' not in self.initial_data:
+            return
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not (user and user.is_authenticated and user.is_superuser):
+            raise serializers.ValidationError({
+                'author': 'Only a superuser can reassign an article to a different author.'
+            })
+
     def validate(self, attrs):
         """Derive a unique slug when the client leaves it blank.
 
         On a partial update neither title nor slug may be present, so the
         existing slug is retained rather than demanding one from the client.
         """
+        self._reject_author_reassignment()
         slug = (attrs.get('slug') or '').strip()
         title = (attrs.get('title') or '').strip()
 

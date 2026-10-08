@@ -59,6 +59,100 @@ class ArticleAPITests(APITestCase):
         self.assertEqual(self.client.patch(f'/api/articles/{article.pk}/', {'is_published': True}, format='json').status_code, 200)
         self.assertEqual(self.client.delete(f'/api/articles/{article.pk}/').status_code, 204)
 
+    def test_staff_cannot_see_or_edit_another_authors_article(self):
+        """Write access is per-author, not merely 'is staff'."""
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.published.author = other
+        self.published.save()
+
+        self.client.force_authenticate(self.staff)
+        # Published content stays visible (it is public anyway), but writes and
+        # deletes are refused — being able to read is not being able to edit.
+        self.assertEqual(self.client.get(f'/api/articles/{self.published.pk}/').status_code, 200)
+        self.assertEqual(
+            self.client.patch(f'/api/articles/{self.published.pk}/', {'title': 'Hijacked'}, format='json').status_code,
+            403,
+        )
+        self.assertEqual(self.client.delete(f'/api/articles/{self.published.pk}/').status_code, 403)
+        self.published.refresh_from_db()
+        self.assertEqual(self.published.title, 'Public')
+
+    def test_staff_cannot_touch_another_authors_draft_by_direct_url(self):
+        """A draft is not public, so it must not even be readable — and a direct
+        lookup must not be a way around the list filter."""
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.draft.author = other
+        self.draft.save()
+
+        self.client.force_authenticate(self.staff)
+        self.assertEqual(self.client.get(f'/api/articles/{self.draft.pk}/').status_code, 404)
+        self.assertEqual(
+            self.client.patch(f'/api/articles/{self.draft.pk}/', {'title': 'Hijacked'}, format='json').status_code,
+            404,
+        )
+        self.draft.refresh_from_db()
+        self.assertEqual(self.draft.title, 'Draft')
+
+    def test_staff_sees_their_own_drafts_but_not_another_authors_draft(self):
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.draft.author = other
+        self.draft.save()
+        self.client.force_authenticate(self.staff)
+        slugs = [item['slug'] for item in self.client.get('/api/articles/').data['results']]
+        self.assertIn('public', slugs)
+        self.assertNotIn('draft', slugs)
+
+    def test_staff_sees_another_authors_published_article_read_only(self):
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.published.author = other
+        self.published.save()
+        self.client.force_authenticate(self.staff)
+        # Published work is public, so it stays readable — only writes are scoped.
+        self.assertEqual(self.client.get(f'/api/articles/{self.published.pk}/').status_code, 200)
+        self.assertEqual(
+            self.client.patch(f'/api/articles/{self.published.pk}/', {'title': 'Nope'}, format='json').status_code,
+            403,
+        )
+        self.published.refresh_from_db()
+        self.assertEqual(self.published.title, 'Public')
+
+    def test_unattributed_article_stays_reachable(self):
+        """`author` is nullable, so such content must not become unreachable."""
+        self.assertIsNone(self.draft.author)
+        self.client.force_authenticate(self.staff)
+        self.assertEqual(self.client.get(f'/api/articles/{self.draft.pk}/').status_code, 200)
+        self.assertEqual(
+            self.client.patch(f'/api/articles/{self.draft.pk}/', {'title': 'Adopted'}, format='json').status_code,
+            200,
+        )
+
+    def test_superuser_can_edit_any_article(self):
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        root = get_user_model().objects.create_superuser(
+            email='root@example.com', username='root', password='password'
+        )
+        self.published.author = other
+        self.published.save()
+
+        self.client.force_authenticate(root)
+        listing = self.client.get('/api/articles/')
+        self.assertIn('public', [item['slug'] for item in listing.data['results']])
+        self.assertEqual(self.client.get(f'/api/articles/{self.draft.pk}/').status_code, 200)
+        self.assertEqual(
+            self.client.patch(f'/api/articles/{self.published.pk}/', {'title': 'Edited'}, format='json').status_code,
+            200,
+        )
+
     def test_normal_user_cannot_write(self):
         self.client.force_authenticate(self.user)
         response = self.client.post('/api/articles/', {'title': 'No', 'slug': 'no', 'content': {'blocks': []}}, format='json')
@@ -198,23 +292,44 @@ class ArticleAPITests(APITestCase):
         self.assertIsNone(item['author_name'])
         self.assertIsNone(item['author_email'])
 
-    def test_staff_can_reassign_the_author(self):
+    def test_staff_cannot_reassign_the_author(self):
+        """Ownership is what grants write access, so it must not be client-writable."""
         self.client.force_authenticate(self.staff)
         response = self.client.patch(
             f'/api/articles/{self.published.pk}/', {'author': self.user.pk}, format='json'
         )
-        self.assertEqual(response.status_code, 200)
-        self.published.refresh_from_db()
-        self.assertEqual(self.published.author, self.user)
-
-    def test_non_staff_cannot_reassign_the_author(self):
-        self.client.force_authenticate(self.user)
-        response = self.client.patch(
-            f'/api/articles/{self.published.pk}/', {'author': self.user.pk}, format='json'
-        )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 400, response.data)
         self.published.refresh_from_db()
         self.assertIsNone(self.published.author)
+
+    def test_staff_cannot_claim_an_article_by_reassigning_it_to_themselves(self):
+        """The escalation path: seize an article, then edit it under the new owner."""
+        other = get_user_model().objects.create_user(
+            email='other-staff@example.com', username='other-staff', is_staff=True
+        )
+        self.published.author = other
+        self.published.save()
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.patch(
+            f'/api/articles/{self.published.pk}/', {'author': self.staff.pk}, format='json'
+        )
+        # The queryset scopes writes, so the article is out of reach entirely.
+        self.assertIn(response.status_code, (400, 403, 404), response.data)
+        self.published.refresh_from_db()
+        self.assertEqual(self.published.author, other)
+
+    def test_superuser_may_reassign_the_author(self):
+        root = get_user_model().objects.create_superuser(
+            email='root@example.com', username='root', password='password'
+        )
+        self.client.force_authenticate(root)
+        response = self.client.patch(
+            f'/api/articles/{self.published.pk}/', {'author': self.staff.pk}, format='json'
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.published.refresh_from_db()
+        self.assertEqual(self.published.author, self.staff)
 
     def test_detail_exposes_author_name_without_requiring_the_client_to_derive_it(self):
         self.staff.display_name = 'Debjyoti Saha'

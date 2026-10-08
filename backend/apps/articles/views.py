@@ -3,10 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+from django.db.models import Q
 from django.http import Http404
 from django_filters.rest_framework import DjangoFilterBackend
 from apps.chatbot.ingestion import ingest_article
 from .models import Category, Tag, Article
+from .permissions import IsAuthorOrReadOnly
 from .serializers import (
     CategorySerializer, TagSerializer,
     ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer
@@ -25,13 +27,23 @@ class AdminWriteOrReadAnyMixin:
     `get_permissions` is the single source of truth, so any admin-only action
     must be listed in ADMIN_ACTIONS — a per-action `permission_classes` would be
     silently ignored because this method overrides DRF's default resolution.
+
+    "Admin" here means a staff user; it is not itself a grant to edit any
+    particular article. A viewset that scopes writes per author sets
+    `author_scoped_writes = True`, which adds the object-level check.
     """
 
     ADMIN_ACTIONS = ('create', 'update', 'partial_update', 'destroy')
 
     def get_permissions(self):
         if self.action in self.ADMIN_ACTIONS:
-            return [IsAdminUser()]
+            # The object-level check only applies to viewsets whose model has an
+            # `author`; ArticleViewSet appends it, and shared mixins such as
+            # CategoryViewSet have no such field to compare against.
+            perms = [IsAdminUser()]
+            if getattr(self, 'author_scoped_writes', False):
+                perms.append(IsAuthorOrReadOnly())
+            return perms
         return [AllowAny()]
 
 
@@ -49,6 +61,9 @@ class TagViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
 
 class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     ADMIN_ACTIONS = AdminWriteOrReadAnyMixin.ADMIN_ACTIONS + ('reindex',)
+    # Opt in to the author check, since the mixin is also used by Category and
+    # Tag, which have no `author` to compare against.
+    author_scoped_writes = True
     queryset = Article.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     # `is_published` is exposed so the admin list can filter by status. It is safe
@@ -70,10 +85,20 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         queryset = Article.objects.select_related('category', 'author').prefetch_related(
             'tags', 'code_snippets'
         )
-        # Staff need drafts to manage content; everyone else can only see published work.
-        if not self.request.user.is_staff:
-            queryset = queryset.filter(is_published=True)
-        return queryset.distinct()
+        user = self.request.user
+        if not (user.is_authenticated and user.is_staff):
+            # Everyone else sees published work only, whoever wrote it.
+            return queryset.filter(is_published=True).distinct()
+
+        # Staff see everything already published — that content is public, and
+        # hiding colleagues' published work would just look broken — plus their
+        # own drafts. `author=None` is included so content imported or seeded
+        # without an author is not stranded, invisible to everyone.
+        if user.is_superuser:
+            return queryset.distinct()
+        return queryset.filter(
+            Q(author=user) | Q(author__isnull=True) | Q(is_published=True)
+        ).distinct()
 
     lookup_field = 'slug'
     lookup_value_regex = '[^/]+'
@@ -99,7 +124,13 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         raise Http404("No article found matching the query")
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        # The author is the creator, so a new article is always one they can
+        # edit. A superuser may pass `author` to publish something on someone
+        # else's behalf; anyone else passing it was refused by the serializer.
+        if serializer.validated_data.get('author') is None:
+            serializer.save(author=self.request.user)
+        else:
+            serializer.save()
 
     @action(detail=True, methods=['post'])
     def reindex(self, request, slug=None, **kwargs):
