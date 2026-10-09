@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CSEHub — Reading Article</title>
+    <title>CSEHub — Article</title>
+    <meta name="description" content="Read in-depth computer science articles on CSEHub." />
+    <meta property="og:type" content="article" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -16,6 +18,8 @@
     <link rel="stylesheet" href="css/chat.css" />
   </head>
   <body>
+    <!-- Reading progress indicator -->
+    <div class="reading-progress" id="reading-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
     <header class="site-header"></header>
 
     <main id="app">

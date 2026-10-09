@@ -7,6 +7,22 @@ import {
   snippetMarkup, highlightSnippets,
 } from './renderer.js';
 
+/** Wire up the thin reading-progress bar that tracks scroll position. */
+function initReadingProgress() {
+  const bar = document.getElementById('reading-progress');
+  if (!bar) return;
+  function update() {
+    const el = document.querySelector('.article-content') || document.documentElement;
+    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+    const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = docHeight > 0 ? Math.min(100, (scrollTop / docHeight) * 100) : 0;
+    bar.style.width = `${progress}%`;
+    bar.setAttribute('aria-valuenow', String(Math.round(progress)));
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+}
+
 function tagsMarkup(tags = []) {
   return tags
     .map((tag) => `<a class="tag" href="articles.html?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`)
@@ -56,8 +72,7 @@ function relatedMarkup(related) {
           <a class="article-related-card" href="article.html?slug=${encodeURIComponent(item.slug || item.id)}">
             <h3>${escapeHtml(item.title)}</h3>
             ${item.excerpt ? `<p>${escapeHtml(item.excerpt)}</p>` : ''}
-            <span class="card-meta">${item.category ? escapeHtml(item.category.name) : 'General'} · ${escapeHtml(formatDate(item.created_at))}</span>
-            ${item.author_name ? `<span class="card-byline">By ${escapeHtml(item.author_name)}</span>` : ''}
+            <p class="card-meta">${item.category ? escapeHtml(item.category.name) : 'General'} · ${escapeHtml(formatDate(item.created_at))}</p>
           </a>`
           )
           .join('')}
@@ -132,7 +147,7 @@ async function initArticle() {
             <div class="article-byline">
               ${article.author_name ? `<span class="byline">By ${escapeHtml(article.author_name)}</span>` : ''}
               <time datetime="${escapeHtml(article.created_at || '')}">${escapeHtml(formatDate(article.created_at))}</time>
-              ${readingTime(article.content) ? `<span class="article-updated">${escapeHtml(readingTime(article.content))}</span>` : ''}
+              ${readingTime(article.content) ? `<span class="reading-time-badge">⏱ ${escapeHtml(readingTime(article.content))}</span>` : ''}
               ${article.updated_at && article.updated_at !== article.created_at
                 ? `<span class="article-updated">Updated ${escapeHtml(formatDate(article.updated_at))}</span>`
                 : ''}
@@ -181,5 +196,6 @@ async function initArticle() {
 
 document.addEventListener('DOMContentLoaded', () => {
   initNavbar();
+  initReadingProgress();
   initArticle();
 });

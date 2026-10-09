@@ -87,15 +87,17 @@ function paginationMarkup(page, filters) {
   const first = (filters.page - 1) * PAGE_SIZE_HINT + 1;
   const last = Math.min(filters.page * PAGE_SIZE_HINT, page.count);
 
+  const totalPages = Math.ceil(page.count / PAGE_SIZE_HINT);
+
   return `
     <nav class="pagination" aria-label="Article pages">
       ${page.previous
-        ? `<a class="button button-secondary" href="${href(filters.page - 1)}" rel="prev">← Newer</a>`
-        : '<span class="button button-secondary is-disabled" aria-disabled="true">← Newer</span>'}
-      <span class="pagination-status">Showing ${first}–${last} of ${page.count}</span>
+        ? `<a class="button button-secondary" href="${href(filters.page - 1)}" rel="prev">← Previous</a>`
+        : '<span class="button button-secondary is-disabled" aria-disabled="true">← Previous</span>'}
+      <span class="pagination-status">Page ${filters.page} of ${totalPages} &middot; ${page.count} articles</span>
       ${page.next
-        ? `<a class="button button-secondary" href="${href(filters.page + 1)}" rel="next">Older →</a>`
-        : '<span class="button button-secondary is-disabled" aria-disabled="true">Older →</span>'}
+        ? `<a class="button button-secondary" href="${href(filters.page + 1)}" rel="next">Next →</a>`
+        : '<span class="button button-secondary is-disabled" aria-disabled="true">Next →</span>'}
     </nav>`;
 }
 
@@ -108,6 +110,7 @@ function emptyStateMarkup(filters) {
       : 'Check back soon — new lessons are added regularly.',
     actionHref: filtered ? 'articles.html' : 'categories.html',
     actionLabel: filtered ? 'Clear all filters' : 'Browse by subject',
+    icon: filtered ? '🔍' : '📚',
   });
 }
 

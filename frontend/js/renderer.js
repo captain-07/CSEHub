@@ -395,9 +395,8 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   const href = `article.html?slug=${encodeURIComponent(slugOrId)}`;
   const image = safeUrl(article.featured_image);
   const summary = article.excerpt || '';
-  // `author_name` is null for unattributed articles, so the byline is omitted
-  // rather than rendered as a dangling separator.
   const authorName = (article.author_name || '').trim();
+  const rt = readingTime(article.content);
 
   return `
     <article class="article-card${featured ? ' article-card-featured' : ''}">
@@ -407,8 +406,9 @@ export function articleCardMarkup(article, { featured = false } = {}) {
           ${article.category
             ? `<a href="articles.html?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>`
             : '<span>General</span>'}
-          <span aria-hidden="true">·</span>
+          <span aria-hidden="true">&middot;</span>
           <time datetime="${escapeHtml(article.created_at || '')}">${escapeHtml(formatDate(article.created_at))}</time>
+          ${rt ? `<span aria-hidden="true">&middot;</span><span>${escapeHtml(rt)}</span>` : ''}
           ${featured ? '<span class="badge">Featured</span>' : ''}
         </p>
         <h3><a href="${href}">${escapeHtml(article.title)}</a></h3>
@@ -420,9 +420,10 @@ export function articleCardMarkup(article, { featured = false } = {}) {
 }
 
 /** Consistent empty / error block for any API-driven region. */
-export function messageStateMarkup({ title, message, actionHref, actionLabel }) {
+export function messageStateMarkup({ title, message, actionHref, actionLabel, icon = '\uD83D\uDD0D' }) {
   return `
     <div class="empty-state">
+      <span class="empty-state-icon" aria-hidden="true">${icon}</span>
       <h3>${escapeHtml(title)}</h3>
       ${message ? `<p>${escapeHtml(message)}</p>` : ''}
       ${actionHref ? `<a class="button button-secondary" href="${escapeHtml(actionHref)}">${escapeHtml(actionLabel || 'Continue')}</a>` : ''}
