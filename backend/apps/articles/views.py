@@ -1,18 +1,20 @@
 from rest_framework import viewsets, filters
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAdminUser, AllowAny
+from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q
 from django.http import Http404
+from drf_spectacular.utils import extend_schema
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters.rest_framework.filterset import BooleanFilter, FilterSet
 from apps.chatbot.ingestion import ingest_article
-from .models import Category, Tag, Article
+from .models import Category, Tag, Article, ArticleReaction, REACTION_NONE
 from .permissions import IsAuthorOrReadOnly
 from .serializers import (
     CategorySerializer, TagSerializer,
-    ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer
+    ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer,
+    ReactionRequestSerializer, ReactionResultSerializer,
 )
 import logging
 
@@ -85,6 +87,12 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     # Opt in to the author check, since the mixin is also used by Category and
     # Tag, which have no `author` to compare against.
     author_scoped_writes = True
+    # Actions that need their own permission class. The mixin's `get_permissions`
+    # is the single source of truth for reads and admin writes, but it has no way
+    # to express "signed in, but not necessarily staff", which is what a
+    # reaction is. Naming the action here is therefore the only way to get past
+    # it; a `permission_classes` on the `@action` would be silently ignored.
+    AUTHENTICATED_ACTIONS = ('react',)
     queryset = Article.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     # `is_published` is exposed so the admin list can filter by status. It is safe
@@ -101,6 +109,12 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         if self.action == 'list':
             return ArticleListSerializer
         return ArticleDetailSerializer
+
+    def get_permissions(self):
+        # See AUTHENTICATED_ACTIONS. Everything else defers to the mixin.
+        if self.action in self.AUTHENTICATED_ACTIONS:
+            return [IsAuthenticated()]
+        return super().get_permissions()
 
     def _is_admin_listing(self):
         """True when the caller is a staff member asking for their own workspace.
@@ -182,6 +196,46 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
             serializer.save(author=self.request.user)
         else:
             serializer.save()
+
+    @extend_schema(
+        request=ReactionRequestSerializer,
+        responses={200: ReactionResultSerializer},
+        summary='Like, dislike, or clear a reaction to this article',
+        description=(
+            'Sets the signed-in reader\'s verdict to the value supplied. A reader '
+            'holds at most one reaction per article, so sending `dislike` after '
+            '`like` moves the reaction rather than adding a second one. Send '
+            '`none` to withdraw it. Idempotent: repeating a request is a no-op.'
+        ),
+    )
+    @action(detail=True, methods=['post'])
+    def react(self, request, slug=None, **kwargs):
+        """Like, dislike, or clear the signed-in reader's reaction.
+
+        Requires an authenticated reader, which is why it is listed in
+        AUTHENTICATED_ACTIONS rather than ADMIN_ACTIONS: the mixin has no way to
+        express "signed in, but not staff".
+        """
+        article = self.get_object()
+
+        serializer = ReactionRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        requested = serializer.validated_data['value']
+
+        # `none` is a wire-only value; clearing means deleting the row.
+        value = ArticleReaction.objects.set_reaction(
+            article, request.user, None if requested == REACTION_NONE else requested
+        )
+
+        # The counters were bumped with `F()` expressions, so the in-memory
+        # article still holds the values from before this request.
+        article.refresh_from_db(fields=['like_count', 'dislike_count'])
+
+        return Response({
+            'value': value,
+            'like_count': article.like_count,
+            'dislike_count': article.dislike_count,
+        })
 
     @action(detail=True, methods=['post'])
     def reindex(self, request, slug=None, **kwargs):

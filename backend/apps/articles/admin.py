@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.db.models import Q
-from .models import Category, Tag, Article, ArticleTag, CodeSnippet
+from .models import Category, Tag, Article, ArticleReaction, ArticleTag, CodeSnippet
 
 
 @admin.register(Category)
@@ -28,7 +28,8 @@ class ArticleTagInline(admin.TabularInline):
 
 @admin.register(Article)
 class ArticleAdmin(admin.ModelAdmin):
-    list_display = ['title', 'category', 'author', 'is_published', 'is_featured', 'created_at']
+    list_display = ['title', 'category', 'author', 'is_published', 'is_featured',
+                    'like_count', 'dislike_count', 'created_at']
     list_filter = ['category', 'is_published', 'is_featured']
     # `content` is a JSONField, which has no text lookup — searching it raises
     # FieldError, so the admin searches the human-readable text fields instead.
@@ -37,6 +38,9 @@ class ArticleAdmin(admin.ModelAdmin):
     list_editable = ['is_published', 'is_featured']
     list_select_related = ['category', 'author']
     inlines = [ArticleTagInline, CodeSnippetInline]
+    # The tallies are maintained by ArticleReactionManager. Editable here only
+    # because an admin may legitimately want to correct a drifted counter; the
+    # repair hatch is `manage.py recompute_reaction_counts`.
     readonly_fields = ['created_at', 'updated_at']
 
     def get_queryset(self, request):
@@ -59,3 +63,15 @@ class ArticleAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return self.has_change_permission(request, obj)
+
+
+@admin.register(ArticleReaction)
+class ArticleReactionAdmin(admin.ModelAdmin):
+    list_display = ['article', 'user', 'value', 'created_at']
+    list_filter = ['value']
+    search_fields = ['article__title', 'user__email']
+    list_select_related = ['article', 'user']
+    # Hand-editing a row here desynchronises the article's tallies, which only
+    # `ArticleReactionManager.set_reaction` maintains. That is deliberate: the
+    # counts are the reader-facing number and must not be silently recomputed by
+    # an unrelated save. Run `manage.py recompute_reaction_counts` afterwards.

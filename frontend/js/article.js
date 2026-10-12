@@ -2,6 +2,7 @@ import { getArticle, getArticles } from './api/articles.js';
 import { ApiError } from './api.js';
 import { initNavbar } from './navbar.js';
 import { openChatForArticle } from './chat.js';
+import { initReactions } from './reactions.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, readingTime, contentToPlainText,
   snippetMarkup, highlightSnippets,
@@ -162,6 +163,8 @@ async function initArticle() {
             ? article.code_snippets.map((snippet) => snippetMarkup(snippet)).join('')
             : ''}
 
+          <div class="article-reactions" id="article-reactions" data-article-key="${escapeHtml(articleKey)}"></div>
+
           <section class="article-ai-cta">
             <div class="article-ai-cta-content">
               <h3>Have questions about this article?</h3>
@@ -177,6 +180,9 @@ async function initArticle() {
 
       bindCopyButtons(shell);
       highlightSnippets(shell);
+      // Not awaited: it resolves the Supabase session first, and the article
+      // should not wait on that to appear.
+      initReactions(shell, article);
 
       const askAiBtn = document.querySelector('#ask-ai-cta-btn');
       if (askAiBtn) {

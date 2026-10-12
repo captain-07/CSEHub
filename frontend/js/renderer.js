@@ -397,6 +397,8 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   const summary = article.excerpt || '';
   const authorName = (article.author_name || '').trim();
   const rt = readingTime(article.content);
+  // Only surfaced once an article has earned one; a "0" on every card is noise.
+  const likes = Number(article.like_count) || 0;
 
   return `
     <article class="article-card${featured ? ' article-card-featured' : ''}">
@@ -409,6 +411,9 @@ export function articleCardMarkup(article, { featured = false } = {}) {
           <span aria-hidden="true">&middot;</span>
           <time datetime="${escapeHtml(article.created_at || '')}">${escapeHtml(formatDate(article.created_at))}</time>
           ${rt ? `<span aria-hidden="true">&middot;</span><span>${escapeHtml(rt)}</span>` : ''}
+          ${likes > 0
+            ? `<span aria-hidden="true">&middot;</span><span class="card-likes">&#128077; ${likes}</span>`
+            : ''}
           ${featured ? '<span class="badge">Featured</span>' : ''}
         </p>
         <h3><a href="${href}">${escapeHtml(article.title)}</a></h3>

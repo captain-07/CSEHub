@@ -69,6 +69,27 @@ export function reindexArticle(id) {
   return apiFetch(`/articles/${encodeURIComponent(id)}/reindex/`, { method: 'POST' });
 }
 
+/* ---------------------------------------------------------------- reactions */
+
+/**
+ * Records the signed-in reader's verdict on an article.
+ *
+ * `value` is the state being asked for — 'like', 'dislike', or 'none' to
+ * withdraw the reaction — rather than a toggle. That makes the call idempotent:
+ * a retry after a dropped response lands on the same verdict instead of
+ * flipping it back. It also lets the UI clear the reaction by clicking the
+ * button that is already active.
+ *
+ * Resolves to `{ value, like_count, dislike_count }`, so the caller can settle
+ * its buttons without re-fetching the article.
+ */
+export function reactToArticle(id, value) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/react/`, {
+    method: 'POST',
+    body: { value },
+  });
+}
+
 /**
  * Follows DRF's `next` links and concatenates every page.
  *

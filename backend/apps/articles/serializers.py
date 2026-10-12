@@ -4,7 +4,10 @@ from django.db import transaction
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema_field
 
-from .models import Category, Tag, Article, CodeSnippet, SUPPORTED_BLOCK_TYPES
+from .models import (
+    Category, Tag, Article, ArticleReaction, CodeSnippet, SUPPORTED_BLOCK_TYPES,
+    REACTION_LIKE, REACTION_DISLIKE, REACTION_NONE,
+)
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -54,7 +57,13 @@ class ArticleListSerializer(serializers.ModelSerializer):
         model = Article
         fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'category', 'tags',
                   'author_name', 'author_email',
+                  'like_count', 'dislike_count',
                   'is_published', 'is_featured', 'created_at', 'updated_at']
+        # The tallies are derived from ArticleReaction rows by the manager. They
+        # are declared read-only explicitly rather than relying on the serializer
+        # never being used for writes, so that adding them here cannot quietly
+        # turn them into client-settable fields on a future write serializer.
+        read_only_fields = ['like_count', 'dislike_count']
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
@@ -67,18 +76,67 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     code_snippets = CodeSnippetSerializer(many=True, read_only=True)
     author_email = serializers.EmailField(source='author.email', read_only=True, default=None)
     author_name = serializers.SerializerMethodField()
+    my_reaction = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
         fields = [
             'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category',
             'tags', 'code_snippets', 'author_name', 'author_email',
+            'like_count', 'dislike_count', 'my_reaction',
             'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
+        read_only_fields = ['like_count', 'dislike_count']
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
         return article_author_name(article)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_my_reaction(self, article):
+        """The requesting reader's own verdict, so the UI can highlight it.
+
+        Null for anonymous callers and for readers who have not reacted. Only on
+        the detail serializer: resolving this needs a query per article, which
+        would turn the list endpoint into an N+1 on a page that shows 20 rows.
+        """
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not (user and user.is_authenticated):
+            return None
+        return article.reactions.filter(user=user).values_list('value', flat=True).first()
+
+
+class ArticleReactionSerializer(serializers.ModelSerializer):
+    """A reader's stored verdict. Read-only; writes go through `set_reaction`."""
+
+    class Meta:
+        model = ArticleReaction
+        fields = ['id', 'value', 'created_at', 'updated_at']
+        read_only_fields = fields
+
+
+class ReactionResultSerializer(serializers.Serializer):
+    """What `react` returns: the verdict now stored plus fresh tallies.
+
+    The counts come back with every reaction so the UI never has to re-fetch the
+    article to settle its buttons.
+    """
+
+    value = serializers.ChoiceField(choices=[REACTION_LIKE, REACTION_DISLIKE], allow_null=True)
+    like_count = serializers.IntegerField()
+    dislike_count = serializers.IntegerField()
+
+
+class ReactionRequestSerializer(serializers.Serializer):
+    """Body of `POST /api/articles/<slug>/react/`.
+
+    `none` clears the reaction rather than storing a third state. The client
+    states the verdict it wants instead of asking for a toggle, so a duplicated
+    or retried request converges instead of flipping the reaction twice.
+    """
+
+    value = serializers.ChoiceField(choices=[REACTION_LIKE, REACTION_DISLIKE, REACTION_NONE])
 
 
 class ArticleWriteSerializer(serializers.ModelSerializer):

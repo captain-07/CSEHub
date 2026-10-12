@@ -320,6 +320,13 @@
   margin-left: auto;
 }
 
+/* Like tally on a card. Kept inline with the other meta text rather than made a
+   badge, so it does not compete with the "Featured" flag for attention. */
+.card-meta .card-likes {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Article title in card */
 .article-card h2 {
   margin: 0 0 1rem 0;

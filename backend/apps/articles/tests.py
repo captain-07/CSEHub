@@ -2,11 +2,15 @@ from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.db import IntegrityError
 from django.test import TestCase
 
 from rest_framework.test import APITestCase
 
-from .models import Article, Category, Tag, SUPPORTED_BLOCK_TYPES
+from .models import (
+    Article, ArticleReaction, Category, Tag, SUPPORTED_BLOCK_TYPES,
+    REACTION_LIKE, REACTION_DISLIKE,
+)
 
 
 class ArticleAPITests(APITestCase):
@@ -519,3 +523,215 @@ class SeedAuthorTests(TestCase):
 
         article.refresh_from_db()
         self.assertEqual(article.author, editor)
+
+
+class ArticleReactionTests(APITestCase):
+    """Reader likes and dislikes.
+
+    Two things are being defended here. First, the counts shown to readers must
+    match the stored reactions exactly, because they are denormalized onto the
+    article and a wrong number is silently public. Second, a reader may hold at
+    most one verdict per article, which the database enforces rather than the
+    view layer.
+    """
+
+    def setUp(self):
+        self.article = Article.objects.create(
+            title='Public', slug='public', content={'blocks': []}, is_published=True
+        )
+        self.draft = Article.objects.create(
+            title='Draft', slug='draft', content={'blocks': []}, is_published=False
+        )
+        self.reader = get_user_model().objects.create_user(
+            email='reader@example.com', username='reader', password='password'
+        )
+        self.other = get_user_model().objects.create_user(
+            email='other@example.com', username='other', password='password'
+        )
+
+    def react(self, value, slug=None, user=None):
+        self.client.force_authenticate(user or self.reader)
+        return self.client.post(
+            f'/api/articles/{slug or self.article.slug}/react/',
+            {'value': value},
+            format='json',
+        )
+
+    def counts(self, article=None):
+        article = article or self.article
+        article.refresh_from_db()
+        return article.like_count, article.dislike_count
+
+    # --- authorization ---
+
+    def test_anonymous_readers_cannot_react(self):
+        response = self.client.post(
+            f'/api/articles/{self.article.slug}/react/',
+            {'value': REACTION_LIKE},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_a_regular_reader_can_react(self):
+        """Reacting is not an admin capability: any signed-in reader may."""
+        response = self.react(REACTION_LIKE)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['value'], REACTION_LIKE)
+
+    def test_readers_cannot_react_to_an_unpublished_article(self):
+        response = self.react(REACTION_LIKE, slug=self.draft.slug)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(ArticleReaction.objects.count(), 0)
+
+    def test_an_unknown_value_is_rejected(self):
+        response = self.react('love')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ArticleReaction.objects.count(), 0)
+
+    def test_a_missing_value_is_rejected(self):
+        self.client.force_authenticate(self.reader)
+        response = self.client.post(
+            f'/api/articles/{self.article.slug}/react/', {}, format='json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+    # --- one verdict per reader ---
+
+    def test_switching_from_like_to_dislike_moves_rather_than_adds(self):
+        self.react(REACTION_LIKE)
+        response = self.react(REACTION_DISLIKE)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['value'], REACTION_DISLIKE)
+        self.assertEqual(ArticleReaction.objects.filter(user=self.reader).count(), 1)
+        self.assertEqual(self.counts(), (0, 1))
+
+    def test_repeating_the_same_value_does_not_double_count(self):
+        """The endpoint is explicit rather than a toggle, so a duplicated request
+        from a flaky connection must converge instead of flipping the verdict."""
+        self.react(REACTION_LIKE)
+        response = self.react(REACTION_LIKE)
+
+        self.assertEqual(response.data['like_count'], 1)
+        self.assertEqual(self.counts(), (1, 0))
+
+    def test_clearing_removes_the_reaction(self):
+        self.react(REACTION_LIKE)
+        response = self.react('none')
+
+        self.assertEqual(response.data['value'], None)
+        self.assertEqual(ArticleReaction.objects.count(), 0)
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_clearing_without_a_reaction_is_a_no_op(self):
+        response = self.react('none')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['value'], None)
+        self.assertEqual(self.counts(), (0, 0))
+
+    def test_the_database_forbids_two_reactions_from_one_reader(self):
+        """Backs the invariant at the layer that actually guarantees it, so a
+        future code path cannot reintroduce the double-vote."""
+        ArticleReaction.objects.create(
+            article=self.article, user=self.reader, value=REACTION_LIKE
+        )
+        with self.assertRaises(IntegrityError):
+            ArticleReaction.objects.create(
+                article=self.article, user=self.reader, value=REACTION_DISLIKE
+            )
+
+    def test_readers_react_independently(self):
+        self.react(REACTION_LIKE, user=self.reader)
+        self.react(REACTION_DISLIKE, user=self.other)
+        self.assertEqual(self.counts(), (1, 1))
+
+    # --- counts and exposure ---
+
+    def test_the_response_reports_the_fresh_counts(self):
+        """The UI settles its buttons from this payload and must not have to
+        re-fetch the article."""
+        self.react(REACTION_LIKE, user=self.reader)
+        response = self.react(REACTION_DISLIKE, user=self.other)
+        self.assertEqual(response.data['like_count'], 1)
+        self.assertEqual(response.data['dislike_count'], 1)
+
+    def test_the_list_endpoint_exposes_counts(self):
+        self.react(REACTION_LIKE)
+        self.client.force_authenticate(None)
+        response = self.client.get('/api/articles/')
+        row = response.data['results'][0]
+        self.assertEqual(row['like_count'], 1)
+        self.assertEqual(row['dislike_count'], 0)
+
+    def test_detail_reports_the_readers_own_reaction(self):
+        self.react(REACTION_LIKE)
+        response = self.client.get(f'/api/articles/{self.article.slug}/')
+        self.assertEqual(response.data['my_reaction'], REACTION_LIKE)
+
+    def test_detail_reports_no_reaction_for_another_reader(self):
+        self.react(REACTION_LIKE, user=self.reader)
+        self.client.force_authenticate(self.other)
+        response = self.client.get(f'/api/articles/{self.article.slug}/')
+        self.assertEqual(response.data['my_reaction'], None)
+
+    def test_detail_reports_no_reaction_for_anonymous_readers(self):
+        self.react(REACTION_LIKE)
+        self.client.force_authenticate(None)
+        response = self.client.get(f'/api/articles/{self.article.slug}/')
+        self.assertEqual(response.data['my_reaction'], None)
+
+    def test_the_list_endpoint_omits_the_readers_own_reaction(self):
+        """It would need a query per row; the detail endpoint carries it instead."""
+        self.react(REACTION_LIKE)
+        response = self.client.get('/api/articles/')
+        self.assertNotIn('my_reaction', response.data['results'][0])
+
+    def test_the_write_serializer_cannot_set_the_counts(self):
+        """Counts are derived. A staff PATCH that tried to set them would
+        otherwise overwrite the tallies with an arbitrary number."""
+        staff = get_user_model().objects.create_user(
+            email='staff@example.com', username='staff2', password='password', is_staff=True
+        )
+        Article.objects.filter(pk=self.article.pk).update(author=staff)
+        self.client.force_authenticate(staff)
+        response = self.client.patch(
+            f'/api/articles/{self.article.slug}/',
+            {'like_count': 9999, 'title': 'Renamed'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.counts(), (0, 0))
+
+    # --- lifecycle ---
+
+    def test_deleting_an_article_removes_its_reactions(self):
+        self.react(REACTION_LIKE)
+        self.article.delete()
+        self.assertEqual(ArticleReaction.objects.count(), 0)
+
+    def test_deleting_a_reader_removes_their_reactions(self):
+        self.react(REACTION_LIKE)
+        self.reader.delete()
+        self.assertEqual(ArticleReaction.objects.count(), 0)
+
+    def test_recompute_repairs_counts_that_drifted(self):
+        """The repair hatch for rows edited outside the manager, e.g. the admin."""
+        ArticleReaction.objects.create(
+            article=self.article, user=self.reader, value=REACTION_LIKE
+        )
+        Article.objects.filter(pk=self.article.pk).update(like_count=99, dislike_count=42)
+
+        call_command('recompute_reaction_counts', stdout=StringIO(), stderr=StringIO())
+
+        self.assertEqual(self.counts(), (1, 0))
+
+    def test_recompute_zeroes_articles_whose_reactions_are_gone(self):
+        self.react(REACTION_LIKE)
+        ArticleReaction.objects.all().delete()
+        Article.objects.filter(pk=self.article.pk).update(like_count=5)
+
+        call_command('recompute_reaction_counts', stdout=StringIO(), stderr=StringIO())
+
+        self.assertEqual(self.counts(), (0, 0))
+
