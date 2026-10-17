@@ -48,7 +48,7 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 - **Article library** — Browse, search, filter by category and tag (the tag choices follow the selected category), sort, and paginate published articles
 - **Long-form reading view** — Sanitized Editor.js rendering with copyable code blocks, images, and related articles
 - **Category browser** — Subject index with live article counts, plus a tag cloud grouped by category
-- **AI article assistant** — Authenticated RAG chatbot (Pinecone + Gemini) scoped to a single article, with persisted conversation history
+- **AI article assistant** — Authenticated RAG chatbot (Pinecone + Gemini) scoped to a single article: answers from the article, and explains jargon the article assumes without defining, with persisted conversation history
 - **Supabase Google OAuth** — "Continue with Google" sign-in; the API auto-provisions a local `User` from a valid Bearer token
 - **User profile** — `GET`/`PATCH /api/me/` for display name, username, and avatar
 - **Static frontend** — HTML/CSS/JS client deployed on Vercel
@@ -437,7 +437,7 @@ One implementation per concern — there is no second router, API client, or art
 | `GET`           | `/api/schema/`                       | OpenAPI schema (JSON)                                   | Public        |
 | —               | `/admin/`                            | Django admin                                            | Staff         |
 
-> **Note on `ask/`** — the RAG endpoint takes `{ "question": "..." }` and returns the whole conversation, the same shape as `conversation/`, so a client needs one parser. A provider outage returns `503` (`code: "chat_unavailable"`); an unexpected fault returns `502`. Neither stores a fabricated assistant reply.
+> **Note on `ask/`** — the RAG endpoint takes `{ "question": "..." }` and returns the whole conversation, the same shape as `conversation/`, so a client needs one parser. The assistant answers from the article when it can, and when the article does not cover the question it says so and adds a short general explanation rather than refusing. A provider outage returns `503` (`code: "chat_unavailable"`); an unexpected fault returns `502`. Neither stores a fabricated assistant reply.
 
 ### Query parameters — `GET /api/articles/`
 

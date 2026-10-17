@@ -7,7 +7,7 @@ from rest_framework.test import APITestCase
 
 from apps.articles.models import Article
 from .models import Conversation
-from .rag_chat import ChatServiceError, _response_text
+from .rag_chat import ChatServiceError, _response_text, answer_question
 
 
 class ChatTests(APITestCase):
@@ -79,6 +79,60 @@ class ChatTests(APITestCase):
         self.assertEqual(_response_text(type('R', (), {'content': [{'text': 'one'}, {'text': ' two'}]})()), 'one two')
         with self.assertRaises(ChatServiceError):
             _response_text({'unexpected': 'shape'})
+
+
+class AnswerQuestionTests(TestCase):
+    """The assistant explains a term the article assumes, instead of refusing.
+
+    Retrieval is scoped to the article, so "what is LL?" on a linked-lists
+    article that never spells the term out returns no useful chunk. The model
+    must still be asked, anchored by the article's title.
+    """
+
+    def setUp(self):
+        self.article = Article.objects.create(
+            title='Linked Lists in Practice',
+            slug='linked-lists',
+            content={'blocks': []},
+            is_published=True,
+        )
+
+    @patch('apps.chatbot.rag_chat.get_llm')
+    @patch('apps.chatbot.rag_chat.get_vectorstore')
+    def test_an_empty_retrieval_still_reaches_the_model(self, get_vectorstore, get_llm):
+        get_vectorstore.return_value.similarity_search.return_value = []
+        get_llm.return_value.invoke.return_value = 'A linked list is a sequence of nodes.'
+
+        answer = answer_question(self.article, 'What is LL?')
+
+        self.assertEqual(answer, 'A linked list is a sequence of nodes.')
+        prompt = get_llm.return_value.invoke.call_args[0][0]
+        self.assertIn('Linked Lists in Practice', prompt)
+        self.assertIn('What is LL?', prompt)
+        self.assertIn('No part of this article matched', prompt)
+
+    @patch('apps.chatbot.rag_chat.get_llm')
+    @patch('apps.chatbot.rag_chat.get_vectorstore')
+    def test_context_and_history_reach_the_prompt(self, get_vectorstore, get_llm):
+        doc = type('Doc', (), {'page_content': 'A node holds a value and a pointer.'})()
+        get_vectorstore.return_value.similarity_search.return_value = [doc]
+        get_llm.return_value.invoke.return_value = 'ok'
+
+        answer_question(self.article, 'What is a node?', history='user: earlier question')
+
+        prompt = get_llm.return_value.invoke.call_args[0][0]
+        self.assertIn('A node holds a value and a pointer.', prompt)
+        self.assertIn('user: earlier question', prompt)
+        self.assertNotIn('No part of this article matched', prompt)
+
+    @patch('apps.chatbot.rag_chat.get_llm')
+    @patch('apps.chatbot.rag_chat.get_vectorstore')
+    def test_a_provider_fault_is_reported_as_a_chat_error(self, get_vectorstore, get_llm):
+        get_vectorstore.return_value.similarity_search.return_value = []
+        get_llm.return_value.invoke.side_effect = RuntimeError('boom')
+
+        with self.assertRaises(ChatServiceError):
+            answer_question(self.article, 'Why?')
 
 
 class ContentToTextTests(TestCase):
