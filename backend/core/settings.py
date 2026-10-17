@@ -189,10 +189,7 @@ STORAGES = {
 # and Django serves them. Local development and CI keep the filesystem so nothing
 # here needs credentials to run the test suite.
 #
-# Cloudinary is the only remote provider. The former Supabase Storage (S3)
-# backend was removed once the migration completed; the one-time import command
-# (`manage.py migrate_images_to_cloudinary`) still reads the old public bucket,
-# located from `SUPABASE_URL` + `SUPABASE_STORAGE_BUCKET` — no S3 credentials.
+# Cloudinary is the only remote provider.
 #
 # `CLOUDINARY_STORAGE['PREFIX']` is pinned to '' so public ids are
 # `articles/<token>` rather than nested under `media/`. See apps.articles.storage
@@ -200,10 +197,6 @@ STORAGES = {
 #
 # See `apps.articles.media.ImageUploadView` for the only caller.
 USE_REMOTE_STORAGE = env.bool('USE_REMOTE_STORAGE', default=False)
-# Legacy: only read by `manage.py migrate_images_to_cloudinary` to locate the old
-# Supabase Storage bucket while copying images to Cloudinary. Safe to delete once
-# no article references the old bucket.
-SUPABASE_STORAGE_BUCKET = env('SUPABASE_STORAGE_BUCKET', default='articles')
 
 # Largest single upload the *provider* will accept, 0 for no provider ceiling.
 # Our own limits in apps.articles.media are clamped against this so a file we

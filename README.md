@@ -93,10 +93,10 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 ### Prerequisites
 
 - Python 3.12 — pinned for Render by `.python-version` at the repo root. Render
-  does **not** read `runtime.txt`; it honours only the `PYTHON_VERSION`
-  environment variable or `.python-version`. Without the pin, Render uses 3.14
-  for services created after 2026-02-11 and the build fails, because
-  `langchain-pinecone==0.2.13` declares `Requires-Python: <3.14`.
+  honours only the `PYTHON_VERSION` environment variable or `.python-version`.
+  Without the pin Render uses 3.14 for services created after 2026-02-11 and the
+  build fails, because `langchain-pinecone==0.2.13` declares
+  `Requires-Python: <3.14`.
 
 - PostgreSQL (local or remote)
 - Supabase project (JWT auth)
@@ -154,12 +154,8 @@ cp backend/.env.example backend/.env
 | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | Yes*     | Fallback database variables when `DATABASE_URL` is not set                                                                                     |
 | `SUPABASE_URL`                                            | Auth only | Supabase project URL; ES256 tokens are verified through its public JWKS endpoint                                                              |
 | `API_PUBLIC_BASE_URL`                                     | No       | Public origin to prefix uploaded image URLs with, if it differs from the request host. Local filesystem storage only |
-| `USE_REMOTE_STORAGE`                                      | No       | `True` to store article images in Supabase Storage instead of the local filesystem (default: `False`)                |
-| `SUPABASE_PROJECT_REF`                                    | Storage  | Project ref, e.g. `abcdefghijklm`. Required when `USE_REMOTE_STORAGE=True`                                          |
-| `SUPABASE_STORAGE_BUCKET`                                 | No       | Public bucket name (default: `articles`)                                                                             |
-| `SUPABASE_S3_ENDPOINT_URL`                                | No       | Defaults to `https://<ref>.storage.supabase.co/storage/v1/s3`                                                          |
-| `SUPABASE_S3_ACCESS_KEY_ID` / `SUPABASE_S3_SECRET_ACCESS_KEY` | Storage | S3 protocol keys from **Storage → S3 Settings**. Not the service-role key. Bypass RLS — server-side only     |
-| `SUPABASE_S3_REGION`                                      | No       | Defaults to the project ref                                                                                           |
+| `USE_REMOTE_STORAGE`                                      | No       | `True` to store article images in Cloudinary instead of the local filesystem (default: `False`)                       |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Storage | Cloudinary credentials from **Settings → API Keys**. Required when `USE_REMOTE_STORAGE=True`. The API secret is server-only |
 | `IMAGE_MAX_DIMENSION`                                     | No       | Long-edge cap for uploaded images (default: `1600`)                                                                  |
 | `IMAGE_WEBP_QUALITY` / `IMAGE_WEBP_METHOD`                | No       | WebP encoder settings (defaults: `82`, `6`)                                                                           |
 | `PINECONE_API_KEY`                                        | RAG only | Pinecone API key; server secret                                                                                                                |
@@ -355,7 +351,6 @@ CSEHub/
 │   │   ├── settings.py
 │   │   ├── urls.py
 │   │   ├── wsgi.py
-│   │   └── asgi.py
 │   ├── media/                     # Uploaded article images (gitignored)
 │   ├── .env.example
 │   └── manage.py
@@ -582,9 +577,9 @@ Every upload is normalised before storage, because the reading column is ~800px 
 
 Tunable via `IMAGE_MAX_DIMENSION`, `IMAGE_WEBP_QUALITY`, `IMAGE_WEBP_METHOD` in `backend/.env`.
 
-> **Keep local and production on different settings.** Leave `USE_REMOTE_STORAGE=False` in `backend/.env` for development — uploads go to `backend/media/` and need no credentials — and set the Supabase variables in **Render's environment dashboard** instead. That keeps local work independent of bucket availability, and means a `backend/.env` can be shared without leaking production credentials.
+> **Keep local and production on different settings.** Leave `USE_REMOTE_STORAGE=False` in `backend/.env` for development — uploads go to `backend/media/` and need no credentials — and set the `CLOUDINARY_*` credentials in **Render's environment dashboard** instead. That keeps local work independent of the bucket, and means a `backend/.env` can be shared without leaking production credentials.
 >
-> If you do enable it locally, Django now refuses to start on a placeholder project ref or missing S3 keys rather than silently generating URLs that 404.
+> If you do enable it locally, Django now refuses to start on missing or placeholder Cloudinary credentials rather than silently generating URLs that 404.
 
 ### Image storage
 
@@ -593,8 +588,9 @@ Tunable via `IMAGE_MAX_DIMENSION`, `IMAGE_WEBP_QUALITY`, `IMAGE_WEBP_METHOD` in 
 | Mode | When | Behaviour |
 | --- | --- | --- |
 | Local filesystem | `USE_REMOTE_STORAGE=False` (default, dev/CI) | Files in `backend/media/`, served by Django at `/media/…`. Lost on redeploy — fine for development. |
-| Supabase Storage | `USE_REMOTE_STORAGE=True` (production) | Files in a public bucket, served by Supabase's CDN. |
-| Cloudinary / R2 / S3 | Same env vars, different endpoint | `django-storages` speaks the S3 protocol; Cloudinary has its own backend. No code change. |
+| Cloudinary | `USE_REMOTE_STORAGE=True` (production) | Files in Cloudinary, served by its CDN. The only remote provider. |
+
+> Supabase Storage (S3) was removed; Cloudinary is the only remote provider. Re-adding an S3-compatible store (R2, Spaces, MinIO) would mean restoring `django-storages` and the backend branch in `settings.py`.
 
 > **Migration note.** Editor.js stores the absolute URL it is given *inside* the article document. That is deliberate — the frontend is served from a different origin than the API, so a relative path would break — but it means published articles are coupled to whichever host served the image. After copying files to a new provider, repoint them:
 >

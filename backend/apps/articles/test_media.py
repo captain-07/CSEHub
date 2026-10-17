@@ -261,12 +261,12 @@ class PublicUrlTests(SimpleTestCase):
     @override_settings(API_PUBLIC_BASE_URL='')
     def test_remote_object_storage_url_is_used_verbatim(self):
         """Regression guard: prefixing a CDN URL yields a double-scheme URL."""
-        remote = 'https://abc.supabase.co/storage/v1/object/public/articles/x.webp'
+        remote = 'https://res.cloudinary.com/demo/image/upload/articles/x.webp'
         self.assertEqual(self._url_for(remote), remote)
 
     @override_settings(API_PUBLIC_BASE_URL='https://proxy.example.com')
     def test_remote_url_is_not_prefixed_even_when_a_base_url_is_set(self):
-        remote = 'https://abc.supabase.co/storage/v1/object/public/articles/x.webp'
+        remote = 'https://res.cloudinary.com/demo/image/upload/articles/x.webp'
         self.assertEqual(self._url_for(remote), remote)
 
 
@@ -379,105 +379,6 @@ CLOUDINARY_DEMO_STORAGE = {
     'CLOUD_NAME': 'demo', 'API_KEY': 'key', 'API_SECRET': 'secret',
     'SECURE': True, 'PREFIX': '',
 }
-
-
-@override_settings(STORAGES=LOCAL_STORAGE_STORAGES, CLOUDINARY_STORAGE=CLOUDINARY_DEMO_STORAGE)
-class MigrateImagesToCloudinaryTests(TestCase):
-    """The copy step. `_collect_targets` and the public id it derives are the
-    parts that can silently do the wrong thing."""
-
-    OLD = 'https://abc.supabase.co/storage/v1/object/public/articles'
-
-    def setUp(self):
-        self.article = Article.objects.create(
-            title='Migration',
-            slug='migration',
-            content={
-                'blocks': [
-                    {'type': 'paragraph', 'data': {'text': f'prose mentioning {self.OLD}'}},
-                    {'type': 'image', 'data': {
-                        'file': {'url': f'{self.OLD}/a.webp'}, 'caption': 'A',
-                    }},
-                    {'type': 'image', 'data': {
-                        'file': {'url': f'{self.OLD}/a.webp'}, 'caption': 'Same file again',
-                    }},
-                    {'type': 'image', 'data': {
-                        'file': {'url': f'{self.OLD}/b.png'},
-                    }},
-                    {'type': 'image', 'data': {
-                        'file': {'url': 'https://example.com/external.jpg'},
-                    }},
-                ],
-            },
-            featured_image=f'{self.OLD}/hero.webp',
-        )
-        Article.objects.create(
-            title='Already migrated', slug='already',
-            content={'blocks': [{'type': 'image', 'data': {
-                'file': {'url': 'https://res.cloudinary.com/demo/image/upload/articles/c'},
-            }}]},
-        )
-
-    def _run(self, *args):
-        from io import StringIO
-        from django.core.management import call_command
-        out = StringIO()
-        call_command('migrate_images_to_cloudinary', *args, stdout=out)
-        return out.getvalue()
-
-    def test_dry_run_uploads_nothing_and_lists_each_file_once(self):
-        with patch('cloudinary.uploader.upload') as upload:
-            output = self._run('--from', self.OLD)
-
-        upload.assert_not_called()
-        self.assertIn('targets    3', output)
-        self.assertIn(f'{self.OLD}/a.webp', output)
-        self.assertIn('Dry run', output)
-
-    def test_external_urls_are_left_alone(self):
-        """A hand-written link to someone else's image is not ours to migrate."""
-        with patch('cloudinary.uploader.upload'):
-            output = self._run('--from', self.OLD, '--apply')
-        self.assertNotIn('external.jpg', output)
-
-    def test_apply_uploads_with_an_extension_free_public_id(self):
-        with patch('cloudinary.uploader.upload') as upload:
-            self._run('--from', self.OLD, '--apply')
-
-        ids = sorted(call.kwargs['public_id'] for call in upload.call_args_list)
-        self.assertEqual(ids, ['articles/a', 'articles/b', 'articles/hero'])
-
-    def test_apply_prints_the_follow_up_rewrite_command(self):
-        with patch('cloudinary.uploader.upload'):
-            output = self._run('--from', self.OLD, '--apply')
-        self.assertIn('--strip-extension', output)
-        self.assertIn(self.OLD, output)
-
-    def test_a_failed_copy_aborts_before_any_url_is_rewritten(self):
-        with patch('cloudinary.uploader.upload', side_effect=Exception('boom')):
-            from django.core.management.base import CommandError
-            with self.assertRaises(CommandError):
-                self._run('--from', self.OLD, '--apply')
-
-        # The command never touches articles, so the stored URLs must be intact.
-        self.article.refresh_from_db()
-        self.assertEqual(
-            self.article.content['blocks'][1]['data']['file']['url'],
-            f'{self.OLD}/a.webp',
-        )
-
-    @override_settings(CLOUDINARY_STORAGE={'CLOUD_NAME': '', 'API_KEY': '', 'API_SECRET': ''})
-    def test_missing_credentials_fail_clearly_instead_of_at_the_api(self):
-        from django.core.management.base import CommandError
-        with self.assertRaises(CommandError) as caught:
-            self._run('--from', self.OLD, '--apply')
-        self.assertIn('CLOUDINARY_CLOUD_NAME', str(caught.exception))
-
-    @override_settings(CLOUDINARY_STORAGE={'CLOUD_NAME': '', 'API_KEY': '', 'API_SECRET': ''})
-    def test_dry_run_still_works_without_credentials(self):
-        """Previewing must not require secrets the operator may not have yet."""
-        output = self._run('--from', self.OLD)
-        self.assertIn('Dry run', output)
 
 
 class ProviderCeilingTests(SimpleTestCase):

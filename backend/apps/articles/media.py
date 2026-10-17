@@ -14,8 +14,8 @@ Design constraints:
   derive an extension from a small allow-list, which removes the path-traversal
   and script-extension vectors of ``FileField.upload_to``.
 * Storage is whatever ``default_storage`` is configured as — a local filesystem
-  in development, Cloudinary or Supabase Storage in production. Nothing here
-  knows the difference, so moving between them is a settings change. See
+  in development, Cloudinary in production. Nothing here knows the difference,
+  so moving between them is a settings change. See
   ``apps.articles.storage`` for the Cloudinary backend and
   ``apps.articles.image_processing`` for the optimise-before-storing step.
 """
