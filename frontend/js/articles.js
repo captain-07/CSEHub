@@ -131,6 +131,60 @@ function populateSelect(select, items, currentValue, allLabel, valueKey = 'slug'
   select.value = currentValue || '';
 }
 
+/**
+ * Fills the tag <select>.
+ *
+ * Tags are scoped to the chosen category: with a category selected the control
+ * offers only that category's tags, flat; without one it lists every tag,
+ * grouped by category. An `<optgroup>` wrapping a single category would just
+ * repeat the category control sitting next to it.
+ *
+ * A tag named in the URL that falls outside that category is appended anyway,
+ * so the control reflects the active filter instead of silently dropping it.
+ */
+function populateTagSelect(select, tags, categories, currentValue, allLabel, categorySlug = '') {
+  if (!select) return;
+  select.innerHTML = `<option value="">${escapeHtml(allLabel)}</option>`;
+
+  const visible = categorySlug
+    ? tags.filter((tag) => tag.category?.slug === categorySlug)
+    : tags;
+
+  if (!visible.length) {
+    const empty = new Option(categorySlug ? 'No topics in this category' : 'No topics yet', '');
+    empty.disabled = true;
+    select.add(empty);
+  } else if (categorySlug) {
+    visible.forEach((tag) => select.add(new Option(tag.name, tag.slug)));
+  } else {
+    const order = new Map(categories.map((category, index) => [category.slug, index]));
+    const groups = new Map();
+    visible.forEach((tag) => {
+      const slug = tag.category?.slug || '';
+      if (!groups.has(slug)) {
+        groups.set(slug, { slug, name: tag.category?.name || 'Uncategorised', tags: [] });
+      }
+      groups.get(slug).tags.push(tag);
+    });
+
+    [...groups.values()]
+      .sort((a, b) => (order.get(a.slug) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.slug) ?? Number.MAX_SAFE_INTEGER))
+      .forEach((group) => {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = group.name;
+        group.tags.forEach((tag) => optgroup.append(new Option(tag.name, tag.slug)));
+        select.append(optgroup);
+      });
+  }
+
+  if (currentValue && !visible.some((tag) => tag.slug === currentValue)) {
+    const stray = tags.find((tag) => tag.slug === currentValue);
+    select.add(new Option(stray ? stray.name : currentValue, currentValue));
+  }
+
+  select.value = currentValue || '';
+}
+
 async function initLibrary() {
   const filters = readFilters();
   const contentArea = document.querySelector('#content-area');
@@ -191,7 +245,9 @@ async function initLibrary() {
     ]);
 
     populateSelect(filterForm?.elements.category, categories, filters.category, 'All categories');
-    populateSelect(filterForm?.elements.tag, tags, filters.tag, 'All topics');
+    // The tag list follows the category filter: pick "DSA" and only DSA's tags
+    // are offered.
+    populateTagSelect(filterForm?.elements.tag, tags, categories, filters.tag, 'All topics', filters.category);
 
     const page = normalizePage(articleData);
     if (!contentArea) return;

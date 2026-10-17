@@ -19,9 +19,24 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class TagSerializer(serializers.ModelSerializer):
+    """A tag and the single category it belongs to.
+
+    Reads carry the category nested so a client can group tags without a second
+    request; writes pass `category_id`, because a nested serializer would make
+    the write shape ambiguous with the read shape. `category_id` is required —
+    a tag cannot exist without a category.
+    """
+
+    category = CategorySerializer(read_only=True)
+    category_id = serializers.PrimaryKeyRelatedField(
+        source='category',
+        queryset=Category.objects.all(),
+        write_only=True,
+    )
+
     class Meta:
         model = Tag
-        fields = ['id', 'name', 'slug']
+        fields = ['id', 'name', 'slug', 'category', 'category_id']
 
 
 class CodeSnippetSerializer(serializers.ModelSerializer):

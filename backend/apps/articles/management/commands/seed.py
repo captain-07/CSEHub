@@ -527,8 +527,25 @@ class Command(BaseCommand):
 
         self.stdout.write('Seeding tags...')
         tags = {}
-        for name in ['array', 'linked-list', 'tree', 'dp', 'graph', 'recursion']:
-            t, _ = Tag.objects.get_or_create(name=name, slug=name)
+        # Each tag is filed under exactly one category. The mapping keeps the
+        # sample taxonomy browsable and matches the backfill the
+        # `tag.category` migration performs for pre-existing rows.
+        for name, category_slug in [
+            ('array', 'dsa'),
+            ('linked-list', 'dsa'),
+            ('tree', 'core-cs'),
+            ('dp', 'dsa'),
+            ('graph', 'system-design'),
+            ('recursion', 'dsa'),
+        ]:
+            t, _ = Tag.objects.get_or_create(
+                name=name,
+                defaults={'slug': name, 'category': cats[category_slug]},
+            )
+            # Backfill a category for tags seeded before the relation existed.
+            if t.category_id is None:
+                t.category = cats[category_slug]
+                t.save(update_fields=['category'])
             tags[name] = t
 
         # Every article below needs an author or it renders with no byline at

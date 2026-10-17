@@ -16,7 +16,7 @@ from .models import (
 class ArticleAPITests(APITestCase):
     def setUp(self):
         self.category = Category.objects.create(name='DSA', slug='dsa')
-        self.tag = Tag.objects.create(name='Array', slug='array')
+        self.tag = Tag.objects.create(name='Array', slug='array', category=self.category)
         self.staff = get_user_model().objects.create_user(
             email='staff@example.com', username='staff', password='password', is_staff=True
         )
@@ -523,6 +523,64 @@ class SeedAuthorTests(TestCase):
 
         article.refresh_from_db()
         self.assertEqual(article.author, editor)
+
+    def test_seeded_tags_belong_to_a_category(self):
+        """Every tag is filed under one category, which the FK now requires."""
+        self.call_seed()
+        tags = Tag.objects.all()
+        self.assertTrue(tags.exists())
+        for tag in tags:
+            self.assertIsNotNone(
+                tag.category, f'seeded tag {tag.slug} has no category'
+            )
+
+
+class TagCategoryTests(APITestCase):
+    """A tag belongs to exactly one category; a category groups many tags."""
+
+    def setUp(self):
+        self.dsa = Category.objects.create(name='DSA', slug='dsa')
+        self.system_design = Category.objects.create(name='System Design', slug='system-design')
+        self.tag = Tag.objects.create(name='Array', slug='array', category=self.dsa)
+        Tag.objects.create(name='Graph', slug='graph', category=self.system_design)
+        self.staff = get_user_model().objects.create_user(
+            email='staff@example.com', username='staff', password='password', is_staff=True
+        )
+
+    def test_tag_payload_includes_its_category(self):
+        response = self.client.get(f'/api/tags/{self.tag.pk}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['category']['slug'], 'dsa')
+
+    def test_tags_can_be_filtered_by_category(self):
+        response = self.client.get('/api/tags/?category__slug=dsa')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['slug'] for item in response.data['results']], ['array'])
+
+    def test_creating_a_tag_requires_a_category(self):
+        self.client.force_authenticate(self.staff)
+        missing = self.client.post('/api/tags/', {'name': 'Tree', 'slug': 'tree'}, format='json')
+        self.assertEqual(missing.status_code, 400)
+        self.assertIn('category_id', missing.data)
+
+        created = self.client.post(
+            '/api/tags/',
+            {'name': 'Tree', 'slug': 'tree', 'category_id': self.dsa.pk},
+            format='json',
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(Tag.objects.get(slug='tree').category, self.dsa)
+
+    def test_deleting_a_category_with_tags_is_refused(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.delete(f'/api/categories/{self.dsa.pk}/')
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Category.objects.filter(pk=self.dsa.pk).exists())
+
+    def test_deleting_an_empty_category_is_allowed(self):
+        self.client.force_authenticate(self.staff)
+        empty = Category.objects.create(name='Web Dev', slug='web-dev')
+        self.assertEqual(self.client.delete(f'/api/categories/{empty.pk}/').status_code, 204)
 
 
 class ArticleReactionTests(APITestCase):

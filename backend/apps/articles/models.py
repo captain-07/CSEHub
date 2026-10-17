@@ -26,8 +26,19 @@ class Category(models.Model):
 
 
 class Tag(models.Model):
+    # A tag belongs to exactly one category; a category groups many tags. Names
+    # and slugs stay globally unique, so a tag slug is an unambiguous lookup key
+    # anywhere it appears (URLs, `?tags__slug=` filters, the tag detail route).
     name = models.CharField(max_length=50, unique=True)
     slug = models.SlugField(unique=True)
+    # PROTECT rather than CASCADE: deleting a category must not silently strip
+    # its tags from the articles that carry them. The API turns the resulting
+    # ProtectedError into a readable 409 (see CategoryViewSet.destroy).
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.PROTECT,
+        related_name='tags',
+    )
 
     class Meta:
         ordering = ['name']

@@ -75,18 +75,51 @@ async function loadCategories() {
   }
 }
 
+/**
+ * Renders the tag cloud, grouped by the category each tag belongs to.
+ *
+ * Tags come back flat with their category nested, so the grouping happens here.
+ * Categories are fetched too so the groups follow the same order as the grid
+ * above; a tag whose category is somehow absent falls to the end rather than
+ * disappearing.
+ */
 async function loadTags() {
   try {
-    const tags = await getTags();
+    const [categories, tags] = await Promise.all([getCategories(), getTags()]);
     if (!tags.length) {
       tagCloud.innerHTML = '';
       document.querySelector('#tags-section')?.setAttribute('hidden', '');
       return;
     }
-    tagCloud.innerHTML = tags
+
+    const byCategory = new Map();
+    tags.forEach((tag) => {
+      const slug = tag.category?.slug || '';
+      if (!byCategory.has(slug)) {
+        byCategory.set(slug, { slug, name: tag.category?.name || 'Uncategorised', tags: [] });
+      }
+      byCategory.get(slug).tags.push(tag);
+    });
+
+    const order = new Map(categories.map((category, index) => [category.slug, index]));
+    const groups = [...byCategory.values()].sort(
+      (a, b) => (order.get(a.slug) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.slug) ?? Number.MAX_SAFE_INTEGER)
+    );
+
+    tagCloud.innerHTML = groups
       .map(
-        (tag) =>
-          `<a class="tag" href="articles.html?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`
+        (group) => `
+          <div class="tag-group">
+            <h3 class="tag-group-title">${escapeHtml(group.name)}</h3>
+            <div class="tag-list">
+              ${group.tags
+                .map(
+                  (tag) =>
+                    `<a class="tag" href="articles.html?tag=${encodeURIComponent(tag.slug)}">${escapeHtml(tag.name)}</a>`
+                )
+                .join('')}
+            </div>
+          </div>`
       )
       .join('');
   } catch {

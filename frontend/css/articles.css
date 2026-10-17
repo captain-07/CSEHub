@@ -404,6 +404,26 @@
   background-color: #d4e8da;
 }
 
+/* Tag cloud grouped by category (categories page). Grouping is visual only —
+   the tag links themselves are unchanged. */
+.tag-groups {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.tag-group-title {
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tag-group .tag-list {
+  margin-bottom: 0;
+}
+
 /* Read more link */
 .text-link {
   margin-top: auto;

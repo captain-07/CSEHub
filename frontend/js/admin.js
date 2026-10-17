@@ -626,11 +626,17 @@ function taxonomyMarkup() {
     .map(
       (tag) => `
       <li class="taxonomy-item">
-        <span>${escapeHtml(tag.name)} <code>/${escapeHtml(tag.slug)}</code></span>
+        <span>${escapeHtml(tag.name)} <code>/${escapeHtml(tag.slug)}</code> <span class="taxonomy-meta">${escapeHtml(tag.category?.name || 'Uncategorised')}</span></span>
         <button class="button button-danger" type="button" data-delete-tag="${tag.id}" data-name="${escapeHtml(tag.name)}">Delete</button>
       </li>`
     )
     .join('');
+
+  const categoryOptions = taxonomy.categories.length
+    ? taxonomy.categories
+        .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`)
+        .join('')
+    : '<option value="">No categories yet</option>';
 
   return `
     ${adminNav('Categories & tags')}
@@ -659,7 +665,12 @@ function taxonomyMarkup() {
           <div class="field">
             <label for="tag-name">New tag</label>
             <input class="input" id="tag-name" name="name" required placeholder="Big O" />
-            <span class="field-hint">Used for fine-grained filtering.</span>
+            <span class="field-hint">Lightweight labels for filtering.</span>
+          </div>
+          <div class="field">
+            <label for="tag-category">Category</label>
+            <select class="select" id="tag-category" name="category" required>${categoryOptions}</select>
+            <span class="field-hint">Every tag belongs to one category.</span>
           </div>
           <button class="button button-primary" type="submit">Add tag</button>
         </form>
@@ -678,14 +689,18 @@ async function renderTaxonomy() {
     app.innerHTML = taxonomyMarkup();
     statusMessage('');
 
-    const bindCreate = (formId, create, label) => {
+    const bindCreate = (formId, create, label, extraFields) => {
       document.querySelector(formId)?.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const input = event.target.elements.name;
+        const form = event.target;
+        const input = form.elements.name;
         const name = input.value.trim();
         if (!name) return;
+        // `extraFields` may return null to abort (e.g. a missing category).
+        const extra = extraFields ? await extraFields(form) : {};
+        if (extra === null) return;
         try {
-          await create({ name, slug: slugify(name) });
+          await create({ name, slug: slugify(name), ...extra });
           input.value = '';
           statusMessage(`${label} "${name}" created.`, 'success');
           await renderRoute();
@@ -696,7 +711,16 @@ async function renderTaxonomy() {
     };
 
     bindCreate('#category-form', createCategory, 'Category');
-    bindCreate('#tag-form', createTag, 'Tag');
+    // A tag must be filed under a category, so its form carries a selector and
+    // refuses to submit without one.
+    bindCreate('#tag-form', createTag, 'Tag', async (form) => {
+      const categoryId = form.elements.category.value;
+      if (!categoryId) {
+        await notify('Choose a category', 'Every tag belongs to a category.', 'error');
+        return null;
+      }
+      return { category_id: Number(categoryId) };
+    });
 
     app.querySelectorAll('[data-delete-category]').forEach((el) =>
       el.addEventListener('click', () => removeTaxonomy('category', el.dataset.deleteCategory, el.dataset.name))
@@ -711,9 +735,12 @@ async function renderTaxonomy() {
 }
 
 async function removeTaxonomy(kind, id, name) {
+  const message = kind === 'category'
+    ? `"${name}" will be removed and its articles become uncategorised. A category that still has tags cannot be deleted.`
+    : `"${name}" will be removed. Articles using it simply lose that tag.`;
   const ok = await confirmAction({
     title: `Delete this ${kind}?`,
-    message: `"${name}" will be removed. Articles using it simply become uncategorised.`,
+    message,
     confirmLabel: 'Delete',
     destructive: true,
   });
@@ -751,10 +778,27 @@ function articleFormMarkup(article) {
     ),
   ].join('');
 
-  const tagOptions = taxonomy.tags
+  // Tags are grouped by their category, matching the rest of the site. An
+  // article may still carry tags from any category — the grouping is only for
+  // finding a tag in a long list.
+  const tagsByCategory = new Map();
+  taxonomy.tags.forEach((tag) => {
+    const key = tag.category?.id ?? '';
+    if (!tagsByCategory.has(key)) {
+      tagsByCategory.set(key, { name: tag.category?.name || 'Uncategorised', tags: [] });
+    }
+    tagsByCategory.get(key).tags.push(tag);
+  });
+
+  const tagOptions = [...tagsByCategory.values()]
     .map(
-      (tag) =>
-        `<option value="${tag.id}" ${selectedTags.has(tag.id) ? 'selected' : ''}>${escapeHtml(tag.name)}</option>`
+      (group) =>
+        `<optgroup label="${escapeHtml(group.name)}">${group.tags
+          .map(
+            (tag) =>
+              `<option value="${tag.id}" ${selectedTags.has(tag.id) ? 'selected' : ''}>${escapeHtml(tag.name)}</option>`
+          )
+          .join('')}</optgroup>`
     )
     .join('');
 

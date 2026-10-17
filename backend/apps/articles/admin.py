@@ -3,15 +3,26 @@ from django.db.models import Q
 from .models import Category, Tag, Article, ArticleReaction, ArticleTag, CodeSnippet
 
 
+class TagInline(admin.TabularInline):
+    """Tags belong to a category, so they can be filed from the category page."""
+
+    model = Tag
+    extra = 0
+    fields = ['name', 'slug']
+
+
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ['name', 'slug']
     prepopulated_fields = {'slug': ('name',)}
+    inlines = [TagInline]
 
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
-    list_display = ['name', 'slug']
+    list_display = ['name', 'slug', 'category']
+    list_filter = ['category']
+    list_select_related = ['category']
     prepopulated_fields = {'slug': ('name',)}
 
 

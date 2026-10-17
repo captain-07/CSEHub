@@ -45,9 +45,9 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 
 ### Public site
 
-- **Article library** — Browse, search, filter by category and tag, sort, and paginate published articles
+- **Article library** — Browse, search, filter by category and tag (the tag choices follow the selected category), sort, and paginate published articles
 - **Long-form reading view** — Sanitized Editor.js rendering with copyable code blocks, images, and related articles
-- **Category browser** — Subject index with live article counts, plus a tag cloud
+- **Category browser** — Subject index with live article counts, plus a tag cloud grouped by category
 - **AI article assistant** — Authenticated RAG chatbot (Pinecone + Gemini) scoped to a single article, with persisted conversation history
 - **Supabase Google OAuth** — "Continue with Google" sign-in; the API auto-provisions a local `User` from a valid Bearer token
 - **User profile** — `GET`/`PATCH /api/me/` for display name, username, and avatar
@@ -424,8 +424,8 @@ One implementation per concern — there is no second router, API client, or art
 | `POST`          | `/api/articles/{id}/reindex/`        | Send a published article's text to Pinecone (RAG)       | Admin         |
 | `GET`           | `/api/categories/`                   | List categories                                         | Public        |
 | `POST` / `PUT` / `PATCH` / `DELETE` | `/api/categories/{id}/` | Create / update / delete a category       | Admin         |
-| `GET`           | `/api/tags/`                         | List tags                                               | Public        |
-| `POST` / `PUT` / `PATCH` / `DELETE` | `/api/tags/{id}/`    | Create / update / delete a tag           | Admin         |
+| `GET`           | `/api/tags/`                         | List tags (`?category__slug=` narrows to one category)  | Public        |
+| `POST` / `PUT` / `PATCH` / `DELETE` | `/api/tags/{id}/`    | Create / update / delete a tag (`category_id` required) | Admin         |
 | `POST`          | `/api/uploads/images/`               | Upload an image for an Editor.js image block            | Admin         |
 | `GET`           | `/api/me/`                           | Current user profile (includes `is_admin`)             | Authenticated |
 | `PATCH`         | `/api/me/`                           | Update display name, username, or avatar                | Authenticated |
@@ -449,6 +449,15 @@ One implementation per concern — there is no second router, API client, or art
 | `is_featured`            | `is_featured=true`     | `true` / `false`                             |
 | `ordering`               | `ordering=-created_at` | `-created_at`, `created_at`, `title`, `-title` |
 | `page`                   | `page=2`               | Page-number pagination, 20 per page          |
+
+### Query parameters — `GET /api/tags/`
+
+| Parameter         | Example                  | Notes                                                  |
+| ----------------- | ------------------------ | ------------------------------------------------------ |
+| `category__slug`  | `category__slug=dsa`     | Exact category slug — every tag belongs to one category |
+| `category`        | `category=3`             | Category primary key                                    |
+
+Every tag belongs to exactly one category, so a tag read nests `category` (`{id, name, slug}`) and a tag write passes `category_id`. A category that still has tags cannot be deleted: `DELETE /api/categories/{id}/` returns `409` until its tags are moved or removed.
 
 ### Pagination envelope
 

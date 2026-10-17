@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Q
+from django.db.models import Q, ProtectedError
 from django.http import Http404
 from drf_spectacular.utils import extend_schema
 from django_filters.rest_framework import DjangoFilterBackend
@@ -55,11 +55,39 @@ class CategoryViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     lookup_field = 'pk'
 
+    def destroy(self, request, *args, **kwargs):
+        """Delete the category, unless its tags still point at it.
+
+        `Tag.category` is PROTECT, so deleting a category that still has tags
+        raises ProtectedError. Django's admin renders that as a friendly page,
+        but here it would surface as a 500; a 409 with the count is something
+        the client can act on.
+        """
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as exc:
+            count = len(exc.protected_objects)
+            return Response(
+                {
+                    'detail': (
+                        f'This category still has {count} tag'
+                        f'{"s" if count != 1 else ""}. Move or delete them first.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
 
 class TagViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
-    queryset = Tag.objects.all()
+    # `tag.category` is part of the serializer's read shape, so it is joined
+    # rather than fetched once per tag.
+    queryset = Tag.objects.select_related('category')
     serializer_class = TagSerializer
     lookup_field = 'pk'
+    filter_backends = [DjangoFilterBackend]
+    # `?category__slug=` narrows the collection to one category's tags, which is
+    # what the grouped tag cloud and the admin tag picker build their views from.
+    filterset_fields = ['category__slug', 'category']
 
 
 class ArticleFilterSet(FilterSet):
@@ -132,8 +160,11 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         return self.request.query_params.get('mine', '').lower() in ('1', 'true', 'yes')
 
     def get_queryset(self):
+        # `tags__category` rather than plain `tags`: the nested TagSerializer
+        # reads `tag.category`, so without the chained prefetch every tag on
+        # every listed article would be its own query.
         queryset = Article.objects.select_related('category', 'author').prefetch_related(
-            'tags', 'code_snippets'
+            'tags__category', 'code_snippets'
         )
         user = self.request.user
 

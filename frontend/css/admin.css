@@ -351,6 +351,12 @@
   font-size: var(--text-xs);
 }
 
+/* The category a tag belongs to, shown after its name in the taxonomy list. */
+.taxonomy-meta {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
 /* --- Preview modal --------------------------------------------------- */
 
 .modal-backdrop {
