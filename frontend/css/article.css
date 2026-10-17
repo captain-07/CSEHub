@@ -108,6 +108,12 @@
   color: var(--text-secondary);
 }
 
+/* Author name in the byline row. */
+.article-byline .byline {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .article-updated::before {
   content: '·';
   margin-right: 0.35rem;
@@ -478,6 +484,11 @@
   font-size: 1.05rem;
   line-height: 1;
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Keep "Not helpful" on one line inside the pill button. */
+.reaction-label {
+  white-space: nowrap;
 }
 
 .reaction-button.is-active .reaction-icon {

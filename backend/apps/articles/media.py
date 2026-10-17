@@ -14,10 +14,10 @@ Design constraints:
   derive an extension from a small allow-list, which removes the path-traversal
   and script-extension vectors of ``FileField.upload_to``.
 * Storage is whatever ``default_storage`` is configured as — a local filesystem
-  in development, Supabase Storage in production. Nothing here knows the
-  difference, so moving to a different backend (Cloudinary, S3, R2) is a
-  settings change. See ``apps.articles.image_processing`` for the
-  optimise-before-storing step.
+  in development, Cloudinary or Supabase Storage in production. Nothing here
+  knows the difference, so moving between them is a settings change. See
+  ``apps.articles.storage`` for the Cloudinary backend and
+  ``apps.articles.image_processing`` for the optimise-before-storing step.
 """
 
 import mimetypes
@@ -59,6 +59,29 @@ MAX_ANIMATED_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
 # Content types that carry no information about the payload, so the filename may
 # be consulted instead. See `_extension_from_name`.
 GENERIC_CONTENT_TYPES = {'', 'application/octet-stream', 'binary/octet-stream'}
+
+
+def provider_max_upload_bytes() -> int:
+    """Hard ceiling imposed by the configured storage provider, 0 if unlimited.
+
+    Cloudinary's Free plan rejects image uploads over 10 MB. Without this clamp
+    an animated GIF that our own 20 MB limit accepts is accepted here and then
+    fails at the provider with an opaque error on a request that already passed
+    every validation check.
+    """
+    return getattr(settings, 'STORAGE_MAX_UPLOAD_BYTES', 0) or 0
+
+
+def _format_limit(limit: int) -> str:
+    """Render a byte ceiling for an error message.
+
+    Whole megabytes are the common case and read naturally; anything else falls
+    back to KB or bytes so a limit below 1 MB does not render as "0 MB".
+    """
+    for unit, size in (('MB', 1024 * 1024), ('KB', 1024)):
+        if limit >= size and limit % size == 0:
+            return f'{limit // size} {unit}'
+    return f'{limit} bytes'
 
 _UPLOAD_SERIALIZER = inline_serializer(
     name='ImageUploadRequest',
@@ -147,15 +170,18 @@ class ImageUploadView(APIView):
         limit = (
             MAX_ANIMATED_UPLOAD_BYTES if optimised.frames > 1 else MAX_UPLOAD_BYTES
         )
+        provider_limit = provider_max_upload_bytes()
+        if provider_limit:
+            limit = min(limit, provider_limit)
         if len(optimised.data) > limit:
             return Response(
-                {'file': [f'Processed images must be {limit // (1024 * 1024)} MB or smaller.']},
+                {'file': [f'Processed images must be {_format_limit(limit)} or smaller.']},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 
         if not optimised.changed and len(raw) > limit:
             return Response(
-                {'file': [f'Images must be {limit // (1024 * 1024)} MB or smaller.']},
+                {'file': [f'Images must be {_format_limit(limit)} or smaller.']},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 

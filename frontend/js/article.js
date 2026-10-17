@@ -130,6 +130,7 @@ async function initArticle() {
     // if that extra request fails.
     const related = await loadRelated(article);
     const hero = safeUrl(article.featured_image);
+    const reading = article.reading_time || readingTime(article.content);
 
     if (shell) {
       shell.innerHTML = `
@@ -148,7 +149,7 @@ async function initArticle() {
             <div class="article-byline">
               ${article.author_name ? `<span class="byline">By ${escapeHtml(article.author_name)}</span>` : ''}
               <time datetime="${escapeHtml(article.created_at || '')}">${escapeHtml(formatDate(article.created_at))}</time>
-              ${readingTime(article.content) ? `<span class="reading-time-badge">⏱ ${escapeHtml(readingTime(article.content))}</span>` : ''}
+              ${reading ? `<span class="reading-time-badge">⏱ ${escapeHtml(reading)}</span>` : ''}
               ${article.updated_at && article.updated_at !== article.created_at
                 ? `<span class="article-updated">Updated ${escapeHtml(formatDate(article.updated_at))}</span>`
                 : ''}

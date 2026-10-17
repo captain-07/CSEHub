@@ -30,6 +30,10 @@ async function loadFeatured(container) {
       return;
     }
 
+    // The section ships hidden so an empty rail never flashes; it has to be
+    // un-hidden here or featured articles would only ever be excluded from the
+    // Recent grid without ever being shown anywhere.
+    if (section) section.hidden = false;
     featured.forEach((article) => featuredIds.add(String(article.id)));
     renderCards(container, featured, { featured: true });
   } catch (error) {

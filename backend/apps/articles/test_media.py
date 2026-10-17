@@ -11,6 +11,8 @@ from rest_framework.test import APITestCase
 
 from apps.articles.models import Article
 from apps.articles.image_processing import optimise_image
+from apps.articles.storage import strip_extension
+from apps.articles.media import provider_max_upload_bytes
 
 from PIL import Image, ImageDraw
 
@@ -206,6 +208,17 @@ class ImageUploadTests(APITestCase):
         self.assertEqual((response.data['width'], response.data['height']), (900, 500))
         self.assertFalse(response.data['animated'])
 
+    @override_settings(STORAGE_MAX_UPLOAD_BYTES=512)
+    def test_provider_ceiling_overrides_the_local_limit(self):
+        """Cloudinary's Free plan caps uploads at 10 MB. An image that passes
+        every local check must not go on to fail at the provider."""
+        self.client.force_authenticate(self.staff)
+        response = self.upload(body=make_animated_gif(frames=4, size=(600, 400)))
+
+        # 4 MB of local headroom, but the provider allows 512 bytes.
+        self.assertEqual(response.status_code, 413, response.data)
+        self.assertIn('512', str(response.data))
+
 
 class PublicUrlTests(SimpleTestCase):
     """`_public_url` must handle both storage shapes without mangling either."""
@@ -321,3 +334,265 @@ class RewriteImageUrlsTests(TestCase):
         first = Article.objects.get(slug='with-image').content
         self._run(*args)
         self.assertEqual(Article.objects.get(slug='with-image').content, first)
+
+    def test_strip_extension_removes_the_file_extension(self):
+        """Cloudinary public ids carry no extension; keeping one doubles it."""
+        self._run(
+            # The full bucket base, not just the host: `--from` replaces a
+            # substring, so a host-only value would leave the bucket path behind.
+            '--from', 'https://old.example.com/storage/v1/object/public/articles',
+            '--to', 'https://res.cloudinary.com/demo/image/upload/articles',
+            '--strip-extension', '--apply',
+        )
+        self.article.refresh_from_db()
+        self.assertEqual(
+            self.article.content['blocks'][1]['data']['file']['url'],
+            'https://res.cloudinary.com/demo/image/upload/articles/a',
+        )
+        self.assertEqual(
+            self.article.featured_image,
+            'https://res.cloudinary.com/demo/image/upload/articles/hero',
+        )
+
+    def test_extension_is_kept_by_default(self):
+        self._run('--from', 'old.example.com', '--to', 'new.example.com', '--apply')
+        self.article.refresh_from_db()
+        self.assertTrue(
+            self.article.content['blocks'][1]['data']['file']['url'].endswith('.webp')
+        )
+
+    def test_strip_extension_keeps_dots_inside_the_public_id(self):
+        from apps.articles.management.commands.rewrite_image_urls import _strip_url_extension
+
+        self.assertEqual(
+            _strip_url_extension('https://h/articles/v1.2/a.webp'),
+            'https://h/articles/v1.2/a',
+        )
+        # A query string is not an extension and must survive.
+        self.assertEqual(
+            _strip_url_extension('https://h/articles/a.webp?v=2'),
+            'https://h/articles/a?v=2',
+        )
+
+
+CLOUDINARY_DEMO_STORAGE = {
+    'CLOUD_NAME': 'demo', 'API_KEY': 'key', 'API_SECRET': 'secret',
+    'SECURE': True, 'PREFIX': '',
+}
+
+
+@override_settings(STORAGES=LOCAL_STORAGE_STORAGES, CLOUDINARY_STORAGE=CLOUDINARY_DEMO_STORAGE)
+class MigrateImagesToCloudinaryTests(TestCase):
+    """The copy step. `_collect_targets` and the public id it derives are the
+    parts that can silently do the wrong thing."""
+
+    OLD = 'https://abc.supabase.co/storage/v1/object/public/articles'
+
+    def setUp(self):
+        self.article = Article.objects.create(
+            title='Migration',
+            slug='migration',
+            content={
+                'blocks': [
+                    {'type': 'paragraph', 'data': {'text': f'prose mentioning {self.OLD}'}},
+                    {'type': 'image', 'data': {
+                        'file': {'url': f'{self.OLD}/a.webp'}, 'caption': 'A',
+                    }},
+                    {'type': 'image', 'data': {
+                        'file': {'url': f'{self.OLD}/a.webp'}, 'caption': 'Same file again',
+                    }},
+                    {'type': 'image', 'data': {
+                        'file': {'url': f'{self.OLD}/b.png'},
+                    }},
+                    {'type': 'image', 'data': {
+                        'file': {'url': 'https://example.com/external.jpg'},
+                    }},
+                ],
+            },
+            featured_image=f'{self.OLD}/hero.webp',
+        )
+        Article.objects.create(
+            title='Already migrated', slug='already',
+            content={'blocks': [{'type': 'image', 'data': {
+                'file': {'url': 'https://res.cloudinary.com/demo/image/upload/articles/c'},
+            }}]},
+        )
+
+    def _run(self, *args):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command('migrate_images_to_cloudinary', *args, stdout=out)
+        return out.getvalue()
+
+    def test_dry_run_uploads_nothing_and_lists_each_file_once(self):
+        with patch('cloudinary.uploader.upload') as upload:
+            output = self._run('--from', self.OLD)
+
+        upload.assert_not_called()
+        self.assertIn('targets    3', output)
+        self.assertIn(f'{self.OLD}/a.webp', output)
+        self.assertIn('Dry run', output)
+
+    def test_external_urls_are_left_alone(self):
+        """A hand-written link to someone else's image is not ours to migrate."""
+        with patch('cloudinary.uploader.upload'):
+            output = self._run('--from', self.OLD, '--apply')
+        self.assertNotIn('external.jpg', output)
+
+    def test_apply_uploads_with_an_extension_free_public_id(self):
+        with patch('cloudinary.uploader.upload') as upload:
+            self._run('--from', self.OLD, '--apply')
+
+        ids = sorted(call.kwargs['public_id'] for call in upload.call_args_list)
+        self.assertEqual(ids, ['articles/a', 'articles/b', 'articles/hero'])
+
+    def test_apply_prints_the_follow_up_rewrite_command(self):
+        with patch('cloudinary.uploader.upload'):
+            output = self._run('--from', self.OLD, '--apply')
+        self.assertIn('--strip-extension', output)
+        self.assertIn(self.OLD, output)
+
+    def test_a_failed_copy_aborts_before_any_url_is_rewritten(self):
+        with patch('cloudinary.uploader.upload', side_effect=Exception('boom')):
+            from django.core.management.base import CommandError
+            with self.assertRaises(CommandError):
+                self._run('--from', self.OLD, '--apply')
+
+        # The command never touches articles, so the stored URLs must be intact.
+        self.article.refresh_from_db()
+        self.assertEqual(
+            self.article.content['blocks'][1]['data']['file']['url'],
+            f'{self.OLD}/a.webp',
+        )
+
+    @override_settings(CLOUDINARY_STORAGE={'CLOUD_NAME': '', 'API_KEY': '', 'API_SECRET': ''})
+    def test_missing_credentials_fail_clearly_instead_of_at_the_api(self):
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError) as caught:
+            self._run('--from', self.OLD, '--apply')
+        self.assertIn('CLOUDINARY_CLOUD_NAME', str(caught.exception))
+
+    @override_settings(CLOUDINARY_STORAGE={'CLOUD_NAME': '', 'API_KEY': '', 'API_SECRET': ''})
+    def test_dry_run_still_works_without_credentials(self):
+        """Previewing must not require secrets the operator may not have yet."""
+        output = self._run('--from', self.OLD)
+        self.assertIn('Dry run', output)
+
+
+class ProviderCeilingTests(SimpleTestCase):
+    """Cloudinary's Free plan caps uploads at 10 MB; ours must respect it."""
+
+    @override_settings(STORAGE_MAX_UPLOAD_BYTES=0)
+    def test_local_filesystem_has_no_provider_ceiling(self):
+        self.assertEqual(provider_max_upload_bytes(), 0)
+
+    @override_settings(STORAGE_MAX_UPLOAD_BYTES=10 * 1024 * 1024)
+    def test_cloudinary_ceiling_is_reported(self):
+        self.assertEqual(provider_max_upload_bytes(), 10 * 1024 * 1024)
+
+
+class CloudinaryPublicIdTests(SimpleTestCase):
+    """Public ids and delivery URLs, with no network access."""
+
+    def setUp(self):
+        import cloudinary
+        self.cloudinary = cloudinary
+        current = cloudinary.config()
+        # `cloudinary.config()` returns a live object that refuses `**` unpacking,
+        # so snapshot the individual keys that matter rather than the whole thing.
+        self._original = {
+            key: getattr(current, key)
+            for key in ('cloud_name', 'api_key', 'api_secret', 'secure', 'force_version')
+        }
+        cloudinary.config(cloud_name='demo', api_key='key', api_secret='secret', secure=True)
+
+    def tearDown(self):
+        self.cloudinary.config(**self._original)
+
+    def _storage(self):
+        from apps.articles.storage import CloudinaryArticleStorage
+        return CloudinaryArticleStorage()
+
+    def test_public_id_drops_only_the_extension(self):
+        self.assertEqual(strip_extension('articles/abc.webp'), 'articles/abc')
+        self.assertEqual(strip_extension('articles/abc'), 'articles/abc')
+        # A dotted folder name must survive; splitext works on the basename only.
+        self.assertEqual(strip_extension('v1.2/articles/abc.webp'), 'v1.2/articles/abc')
+
+    def test_url_is_unsigned(self):
+        """A signature is derived from the API secret, so rotating it would
+        invalidate every URL already stored in published article JSON."""
+        url = self._storage().url('articles/abc')
+        self.assertEqual(url, 'https://res.cloudinary.com/demo/image/upload/articles/abc')
+        self.assertNotIn('/s--', url)
+
+    def test_url_does_not_double_the_extension(self):
+        self.assertNotIn('.webp.webp', self._storage().url('articles/abc.webp'))
+
+    def test_url_is_the_same_with_or_without_the_extension(self):
+        storage = self._storage()
+        self.assertEqual(
+            storage.url('articles/abc.webp'), storage.url('articles/abc')
+        )
+
+    def test_folder_prefix_is_not_applied(self):
+        """`PREFIX` defaults to MEDIA_URL; settings pins it to '' so public ids
+        match the object keys used by the previous S3 bucket."""
+        self.assertNotIn('/media/', self._storage().url('articles/abc'))
+
+
+class CloudinarySaveErrorTests(SimpleTestCase):
+    """A provider rejection must become a 400, not an AttributeError.
+
+    Regression guard: the handler used to name `cloudinary.api.Error`, which the
+    SDK does not expose, so any failed upload raised `AttributeError` and the
+    original Cloudinary error was lost. The SDK signals status through exception
+    *types* (BadRequest/NotFound/AlreadyExists/GeneralError) rather than an
+    `http_code` attribute.
+    """
+
+    def setUp(self):
+        import cloudinary
+        self.cloudinary = cloudinary
+        current = cloudinary.config()
+        self._original = {
+            key: getattr(current, key)
+            for key in ('cloud_name', 'api_key', 'api_secret', 'secure')
+        }
+        cloudinary.config(cloud_name='demo', api_key='key', api_secret='secret', secure=True)
+
+    def tearDown(self):
+        self.cloudinary.config(**self._original)
+
+    def _save(self):
+        from django.core.files.base import ContentFile
+        from apps.articles.storage import CloudinaryArticleStorage
+        return CloudinaryArticleStorage()._save('articles/x.webp', ContentFile(b'data'))
+
+    def test_client_rejection_becomes_a_validation_error(self):
+        from django.core.exceptions import ValidationError
+        with patch(
+            'cloudinary.uploader.upload',
+            side_effect=self.cloudinary.exceptions.BadRequest('bad image'),
+        ):
+            with self.assertRaises(ValidationError):
+                self._save()
+
+    def test_an_existing_asset_is_treated_as_a_client_error(self):
+        from django.core.exceptions import ValidationError
+        with patch(
+            'cloudinary.uploader.upload',
+            side_effect=self.cloudinary.exceptions.AlreadyExists('exists'),
+        ):
+            with self.assertRaises(ValidationError):
+                self._save()
+
+    def test_provider_outage_is_reraised_as_a_server_error(self):
+        with patch(
+            'cloudinary.uploader.upload',
+            side_effect=self.cloudinary.exceptions.GeneralError('provider down'),
+        ):
+            with self.assertRaises(self.cloudinary.exceptions.GeneralError):
+                self._save()
+

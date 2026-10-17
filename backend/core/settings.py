@@ -53,6 +53,9 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # Cloudinary — must follow staticfiles
+    'cloudinary',
+    'cloudinary_storage',
     # added apps
     'rest_framework',
     'corsheaders',
@@ -181,78 +184,64 @@ STORAGES = {
 
 # --- Article image storage -------------------------------------------------
 #
-# `USE_REMOTE_STORAGE` switches uploaded article images from the local filesystem
-# to any S3-compatible object store. Supabase Storage is what this project uses;
-# R2, Spaces and MinIO work unchanged by editing the endpoint.
+# `USE_REMOTE_STORAGE` switches uploaded article images off the local filesystem.
+# When true, images are stored in Cloudinary; when false they go to `MEDIA_ROOT`
+# and Django serves them. Local development and CI keep the filesystem so nothing
+# here needs credentials to run the test suite.
 #
-# Local development and CI keep the filesystem so nothing here needs credentials
-# to run the test suite.
+# Cloudinary is the only remote provider. The former Supabase Storage (S3)
+# backend was removed once the migration completed; the one-time import command
+# (`manage.py migrate_images_to_cloudinary`) still reads the old public bucket,
+# located from `SUPABASE_URL` + `SUPABASE_STORAGE_BUCKET` — no S3 credentials.
 #
-# Two options below are easy to get wrong and fail *quietly*:
-#
-#   querystring_auth=False  Supabase object URLs are already public. Left True,
-#                          django-storages appends a short-lived signature, so
-#                          every stored image URL in article JSON expires.
-#   custom_domain          Without it, generated URLs point at the S3 API
-#                          endpoint, which requires a signature *even for a public
-#                          bucket* — uploads succeed and every image 403s.
-#                          The value is the public REST path and must omit the
-#                          scheme, which django-storages adds itself.
+# `CLOUDINARY_STORAGE['PREFIX']` is pinned to '' so public ids are
+# `articles/<token>` rather than nested under `media/`. See apps.articles.storage
+# for the two Cloudinary defaults that have to be subclassed away there.
 #
 # See `apps.articles.media.ImageUploadView` for the only caller.
 USE_REMOTE_STORAGE = env.bool('USE_REMOTE_STORAGE', default=False)
-SUPABASE_PROJECT_REF = env('SUPABASE_PROJECT_REF', default='')
+# Legacy: only read by `manage.py migrate_images_to_cloudinary` to locate the old
+# Supabase Storage bucket while copying images to Cloudinary. Safe to delete once
+# no article references the old bucket.
+SUPABASE_STORAGE_BUCKET = env('SUPABASE_STORAGE_BUCKET', default='articles')
 
-# Placeholders copied from .env.example. These produce syntactically valid but
-# entirely fictional hosts (`your-project-ref.storage.supabase.co`), so every
-# uploaded image would 404 with no obvious cause — worth catching at startup.
-_PLACEHOLDER_VALUES = {'', 'your-project-ref', 'your_project_ref', 'changeme', 'changeme'}
+# Largest single upload the *provider* will accept, 0 for no provider ceiling.
+# Our own limits in apps.articles.media are clamped against this so a file we
+# accepted cannot fail at the provider with an opaque HTTP error.
+STORAGE_MAX_UPLOAD_BYTES = 0
+
+# Placeholders copied from .env.example, worth catching at startup rather than
+# later on an upload.
+_PLACEHOLDER_VALUES = {'', 'changeme'}
+
+# Read unconditionally, not only when Cloudinary is active: cloudinary_storage
+# resolves these the moment its backend class is imported, and it raises a
+# generic ImproperlyConfigured if the dict is missing. Defining it here means
+# the specific message from the validation block below is what a developer sees.
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME', default=''),
+    'API_KEY': env('CLOUDINARY_API_KEY', default=''),
+    'API_SECRET': env('CLOUDINARY_API_SECRET', default=''),
+    'SECURE': True,
+    'PREFIX': '',
+}
 
 if USE_REMOTE_STORAGE:
-    if SUPABASE_PROJECT_REF.strip().lower() in _PLACEHOLDER_VALUES:
-        raise environ.ImproperlyConfigured(
-            'SUPABASE_PROJECT_REF is still the placeholder value. Set it to your '
-            "project ref — the subdomain of your project URL, e.g. 'abc123xyz' "
-            'from https://abc123xyz.supabase.co — or set USE_REMOTE_STORAGE=False '
-            'to use local filesystem storage.'
-        )
-
-    _bucket = env('SUPABASE_STORAGE_BUCKET', default='articles')
     for _name, _value in (
-        ('SUPABASE_S3_ACCESS_KEY_ID', env('SUPABASE_S3_ACCESS_KEY_ID', default='')),
-        ('SUPABASE_S3_SECRET_ACCESS_KEY', env('SUPABASE_S3_SECRET_ACCESS_KEY', default='')),
+        ('CLOUDINARY_CLOUD_NAME', CLOUDINARY_STORAGE['CLOUD_NAME']),
+        ('CLOUDINARY_API_KEY', CLOUDINARY_STORAGE['API_KEY']),
+        ('CLOUDINARY_API_SECRET', CLOUDINARY_STORAGE['API_SECRET']),
     ):
         if not _value or _value.lower() in _PLACEHOLDER_VALUES or _value.startswith('your-'):
             raise environ.ImproperlyConfigured(
-                f'{_name} is missing or still a placeholder. Generate a pair in '
-                'the Supabase dashboard under Storage -> S3 Settings. These are '
-                'S3 protocol keys, NOT the service_role key.'
+                f'{_name} is missing or still a placeholder. Copy the cloud name and '
+                'the API key pair from the Cloudinary console under Settings -> API '
+                'Keys, or set USE_REMOTE_STORAGE=False to use local filesystem storage.'
             )
-    STORAGES['default'] = {
-        'BACKEND': 'storages.backends.s3.S3Storage',
-        'OPTIONS': {
-            'bucket_name': _bucket,
-            # The dedicated storage hostname, not the project hostname.
-            'endpoint_url': env(
-                'SUPABASE_S3_ENDPOINT_URL',
-                default=(
-                    f'https://{SUPABASE_PROJECT_REF}.storage.supabase.co/storage/v1/s3'
-                ),
-            ),
-            'access_key': env('SUPABASE_S3_ACCESS_KEY_ID', default=''),
-            'secret_key': env('SUPABASE_S3_SECRET_ACCESS_KEY', default=''),
-            'region_name': env('SUPABASE_S3_REGION', default=SUPABASE_PROJECT_REF),
-            # Supabase does not support virtual-hosted-style URLs.
-            'addressing_style': 'path',
-            'signature_version': 's3v4',
-            'querystring_auth': False,
-            'custom_domain': (
-                f'{SUPABASE_PROJECT_REF}.supabase.co/storage/v1/object/public/{_bucket}'
-            ),
-            # Images are public article assets; never make them private.
-            'default_acl': None,
-        },
-    }
+    STORAGES['default'] = {'BACKEND': 'apps.articles.storage.CloudinaryArticleStorage'}
+    # The Free plan rejects image uploads above 10 MB. Raising this costs money
+    # (the next tier is 20 MB), so it is tied to the plan rather than assumed.
+    STORAGE_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 # --- Image optimisation ----------------------------------------------------
 #
@@ -281,7 +270,10 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG
 if not DEBUG:
     # Render terminates SSL at the proxy/load balancer.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=False)
+    # A request that reaches Django without X-Forwarded-Proto=https is a
+    # misconfiguration worth redirecting, or else plain HTTP is served. Defaults
+    # on; set the env var to False for a non-proxied local run with DEBUG=False.
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=True)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 

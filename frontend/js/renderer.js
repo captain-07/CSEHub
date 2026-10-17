@@ -396,7 +396,9 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   const image = safeUrl(article.featured_image);
   const summary = article.excerpt || '';
   const authorName = (article.author_name || '').trim();
-  const rt = readingTime(article.content);
+  // The list endpoint omits `content`, so the server now sends a ready-made
+  // `reading_time`; the local computation stays as a fallback for detail views.
+  const rt = article.reading_time || readingTime(article.content);
   // Only surfaced once an article has earned one; a "0" on every card is noise.
   const likes = Number(article.like_count) || 0;
 

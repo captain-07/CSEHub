@@ -30,6 +30,8 @@ Usage
         --to   new.example.com/storage/v1/object/public/articles --apply
 """
 
+import re
+
 from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand, CommandError
 
@@ -68,17 +70,29 @@ class Command(BaseCommand):
             action='store_true',
             help='Only rewrite inline Editor.js image blocks, not Article.featured_image.',
         )
+        parser.add_argument(
+            '--strip-extension',
+            action='store_true',
+            help=(
+                'Remove a trailing file extension from rewritten URLs. Cloudinary '
+                'stores the format in the asset, not in the public id, so a name '
+                'like "a.webp" becomes ".../a" — keeping the extension yields a '
+                'doubled "a.webp.webp" URL that 404s.'
+            ),
+        )
 
     def handle(self, *args, **options):
         old = options['old']
         apply_changes = options['apply']
         replacement = options['new'] or _current_storage_base()
+        strip_extension = options['strip_extension']
 
         if not old:
             raise CommandError('--from must not be empty.')
 
         self.stdout.write(f'Replacing  {old!r}')
         self.stdout.write(f'      with  {replacement!r}')
+        self.stdout.write(f'   strip   {strip_extension}')
         self.stdout.write(f'    apply  {apply_changes}')
         self.stdout.write('')
 
@@ -90,7 +104,9 @@ class Command(BaseCommand):
 
             content = article.content
             if isinstance(content, dict):
-                new_content = self._rewrite_content(content, old, replacement, changes)
+                new_content = self._rewrite_content(
+                    content, old, replacement, strip_extension, changes
+                )
                 if new_content != content:
                     changes.append('content')
 
@@ -106,10 +122,14 @@ class Command(BaseCommand):
             if apply_changes:
                 fields = []
                 if 'content' in changes:
-                    article.content = self._rewrite_content(content, old, replacement, [])
+                    article.content = self._rewrite_content(
+                        content, old, replacement, strip_extension, []
+                    )
                     fields.append('content')
                 if 'featured_image' in changes:
-                    article.featured_image = article.featured_image.replace(old, replacement)
+                    article.featured_image = self._swap(
+                        article.featured_image, old, replacement, strip_extension
+                    )
                     fields.append('featured_image')
                 article.save(update_fields=fields)
 
@@ -128,7 +148,14 @@ class Command(BaseCommand):
         if not apply_changes and touched:
             self.stdout.write('Re-run with --apply to save these changes.')
 
-    def _rewrite_content(self, content, old, replacement, changes):
+    def _swap(self, url, old, replacement, strip_extension):
+        """Replace `old` with `replacement`, optionally dropping a file extension."""
+        swapped = url.replace(old, replacement)
+        if strip_extension:
+            swapped = _strip_url_extension(swapped)
+        return swapped
+
+    def _rewrite_content(self, content, old, replacement, strip_extension, changes):
         """Return content with image-block URLs replaced. Mutates ``changes``."""
         blocks = content.get('blocks')
         if not isinstance(blocks, list):
@@ -142,7 +169,7 @@ class Command(BaseCommand):
                 new_blocks.append(block)
                 continue
 
-            new_block, changed = self._rewrite_block(block, old, replacement)
+            new_block, changed = self._rewrite_block(block, old, replacement, strip_extension)
             if changed:
                 changes.append('content')
             new_blocks.append(new_block)
@@ -150,7 +177,7 @@ class Command(BaseCommand):
         updated['blocks'] = new_blocks
         return updated
 
-    def _rewrite_block(self, block, old, replacement):
+    def _rewrite_block(self, block, old, replacement, strip_extension):
         data = block.get('data')
         if not isinstance(data, dict):
             return block, False
@@ -163,7 +190,9 @@ class Command(BaseCommand):
         if isinstance(file_info, dict) and isinstance(file_info.get('url'), str):
             if old in file_info['url']:
                 new_file = dict(file_info)
-                new_file['url'] = new_file['url'].replace(old, replacement)
+                new_file['url'] = self._swap(
+                    file_info['url'], old, replacement, strip_extension
+                )
                 new_data['file'] = new_file
                 changed = True
 
@@ -171,13 +200,28 @@ class Command(BaseCommand):
         for key in ('url', 'link'):
             value = data.get(key)
             if isinstance(value, str) and old in value:
-                new_data[key] = value.replace(old, replacement)
+                new_data[key] = self._swap(value, old, replacement, strip_extension)
                 changed = True
 
         if not changed:
             return block, False
 
         return {**block, 'data': new_data}, True
+
+
+_EXTENSION_RE = re.compile(r'\.[A-Za-z0-9]{1,8}(?=$|[?#])')
+
+
+def _strip_url_extension(url: str) -> str:
+    """Drop a trailing `.ext` from the path, leaving any query or fragment intact.
+
+    Anchored to the end of the path so a Cloudinary public id such as
+    `.../articles/a.b.webp` keeps every dot but the extension.
+    """
+    head, separator, tail = url.partition('?')
+    if not separator:
+        head, separator, tail = url.partition('#')
+    return _EXTENSION_RE.sub('', head) + separator + tail
 
 
 def _current_storage_base() -> str:

@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -41,6 +43,72 @@ def article_author_name(article):
     return author.display_name or author.username or author.email
 
 
+# Word count is derived server-side because cards are built from the *list*
+# endpoint, which omits `content` on purpose (see `ArticleListSerializer`). The
+# client used to compute this from `article.content`, which is absent from list
+# payloads, so the reading time silently never rendered on any card.
+_WORDS_PER_MINUTE = 200
+_HTML_BREAK_RE = re.compile(r'<br\s*/?>', re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r'<[^>]*>')
+
+
+def _plain_text(value):
+    """Inline HTML -> plain text, mirroring `renderer.stripInlineHtml`."""
+    text = _HTML_BREAK_RE.sub(' ', str(value))
+    text = _HTML_TAG_RE.sub('', text)
+    return ' '.join(text.split())
+
+
+def _content_words(content):
+    """Word count of an Editor.js document, mirroring `renderer.contentToPlainText`."""
+    parts = []
+
+    def push(value):
+        text = _plain_text(value)
+        if text:
+            parts.append(text)
+
+    if isinstance(content, str):
+        push(content)
+    elif isinstance(content, dict):
+        blocks = content.get('blocks')
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                data = block.get('data')
+                if not isinstance(data, dict):
+                    continue
+                if isinstance(data.get('text'), str):
+                    push(data['text'])
+                elif isinstance(data.get('code'), str):
+                    if data['code'].strip():
+                        parts.append(data['code'])
+                elif isinstance(data.get('items'), list):
+                    for item in data['items']:
+                        push(item.get('content') if isinstance(item, dict) else item)
+                elif isinstance(data.get('caption'), str):
+                    push(data['caption'])
+                elif isinstance(data.get('url'), str):
+                    push(data['url'])
+
+    return len(' '.join(parts).split())
+
+
+def article_reading_time(content):
+    """Approximate reading time ("5 min read"), or None when there is no text.
+
+    `int(x + 0.5)` reproduces JavaScript's `Math.round` so the label matches the
+    client fallback at exact half-minute boundaries, where Python's banker's
+    rounding would round the other way.
+    """
+    words = _content_words(content)
+    if not words:
+        return None
+    minutes = max(1, int(words / _WORDS_PER_MINUTE + 0.5))
+    return f'{minutes} min read'
+
+
 # Both read serializers expose the byline. Cards are built from the *list*
 # endpoint, so restricting it to the detail serializer silently guarantees that
 # article grids can never show an author regardless of what the database holds.
@@ -52,11 +120,12 @@ class ArticleListSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True, read_only=True)
     author_email = serializers.EmailField(source='author.email', read_only=True, default=None)
     author_name = serializers.SerializerMethodField()
+    reading_time = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
         fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'category', 'tags',
-                  'author_name', 'author_email',
+                  'author_name', 'author_email', 'reading_time',
                   'like_count', 'dislike_count',
                   'is_published', 'is_featured', 'created_at', 'updated_at']
         # The tallies are derived from ArticleReaction rows by the manager. They
@@ -69,6 +138,10 @@ class ArticleListSerializer(serializers.ModelSerializer):
     def get_author_name(self, article):
         return article_author_name(article)
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_reading_time(self, article):
+        return article_reading_time(article.content)
+
 
 class ArticleDetailSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
@@ -76,13 +149,14 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     code_snippets = CodeSnippetSerializer(many=True, read_only=True)
     author_email = serializers.EmailField(source='author.email', read_only=True, default=None)
     author_name = serializers.SerializerMethodField()
+    reading_time = serializers.SerializerMethodField()
     my_reaction = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
         fields = [
             'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category',
-            'tags', 'code_snippets', 'author_name', 'author_email',
+            'tags', 'code_snippets', 'author_name', 'author_email', 'reading_time',
             'like_count', 'dislike_count', 'my_reaction',
             'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
@@ -91,6 +165,10 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
         return article_author_name(article)
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_reading_time(self, article):
+        return article_reading_time(article.content)
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_my_reaction(self, article):
