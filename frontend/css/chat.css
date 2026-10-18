@@ -109,8 +109,8 @@
 .chat-message.error {
   align-self: flex-start;
   max-width: 92%;
-  background-color: #fdf2f2;
-  border: 1px solid #f5c2c2;
+  background-color: var(--error-soft);
+  border: 1px solid var(--error-border);
   color: var(--error);
   font-size: var(--text-sm);
   line-height: 1.5;
@@ -151,7 +151,7 @@
 }
 
 .chat-input:focus {
-  outline: 2px solid #9fc8b0;
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
   border-color: var(--accent);
 }
 

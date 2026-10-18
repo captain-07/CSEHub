@@ -3,6 +3,7 @@ import { initNavbar } from './navbar.js';
 import { initAuth, getAuthState, subscribeAuth, updateAuthStateProfile, refreshProfile } from './auth-state.js';
 import { logoutUser } from './auth.js';
 import { escapeHtml, safeUrl } from './renderer.js';
+import { showToast } from './toast.js';
 
 let renderedProfileId = null;
 
@@ -195,12 +196,11 @@ async function saveProfile(form) {
     // Update single source of auth state truth
     updateAuthStateProfile(updatedProfile);
 
-    // Success response
-    alertBox.innerHTML = `
-      <div class="alert alert-success">
-        Profile updated successfully!
-      </div>
-    `;
+    // Confirmation lives in a toast rather than the inline alert box: the user
+    // is reading the form, and a box above it that never dismisses just gets
+    // in the way after the first save.
+    alertBox.innerHTML = '';
+    showToast('Profile updated successfully.', { type: 'success' });
 
     // Update header name display in profile card
     const headerName = document.querySelector('#header-name');
@@ -211,6 +211,8 @@ async function saveProfile(form) {
   } catch (error) {
     console.error("Profile save failed:", error);
     const message = error instanceof ApiError ? error.message : "Failed to update profile settings.";
+    // Errors stay inline in the alert box: they often need reading more than
+    // once, and a toast that disappears invites a silent save they think worked.
     alertBox.innerHTML = `
       <div class="alert alert-error">
         <strong>Error updating profile:</strong> ${escapeHtml(message)}

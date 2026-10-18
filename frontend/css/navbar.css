@@ -12,6 +12,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: var(--space-2xs);
   min-height: 76px;
 }
 
@@ -156,6 +157,33 @@
   cursor: pointer;
   color: var(--text-primary);
 }
+
+/* Theme toggle — sits after the nav (so it doubles as a mobile-visible control
+ * before the hamburger) and swaps its icon with the active theme. */
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Exactly one icon is current: the sun offers "light" when dark is on. */
+.theme-icon-moon { display: none; }
+
+:root[data-theme='dark'] .theme-icon-sun { display: none; }
+:root[data-theme='dark'] .theme-icon-moon { display: block; }
 
 @media (max-width: 1080px) {
   /* The search field is the first thing to give up width: the destination

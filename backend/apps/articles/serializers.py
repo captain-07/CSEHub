@@ -139,15 +139,16 @@ class ArticleListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Article
-        fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'category', 'tags',
+        fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'category', 'tags',
                   'author_name', 'author_email', 'reading_time',
-                  'like_count', 'dislike_count',
+                  'like_count', 'dislike_count', 'view_count',
                   'is_published', 'is_featured', 'created_at', 'updated_at']
-        # The tallies are derived from ArticleReaction rows by the manager. They
-        # are declared read-only explicitly rather than relying on the serializer
+        # The tallies are derived from ArticleReaction rows by the manager, and
+        # `view_count` is written only by `Article.record_view`. They are
+        # declared read-only explicitly rather than relying on the serializer
         # never being used for writes, so that adding them here cannot quietly
         # turn them into client-settable fields on a future write serializer.
-        read_only_fields = ['like_count', 'dislike_count']
+        read_only_fields = ['like_count', 'dislike_count', 'view_count']
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
@@ -170,12 +171,12 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Article
         fields = [
-            'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category',
+            'id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'content', 'category',
             'tags', 'code_snippets', 'author_name', 'author_email', 'reading_time',
-            'like_count', 'dislike_count', 'my_reaction',
+            'like_count', 'dislike_count', 'view_count', 'my_reaction',
             'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['like_count', 'dislike_count']
+        read_only_fields = ['like_count', 'dislike_count', 'view_count']
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
@@ -221,6 +222,17 @@ class ReactionResultSerializer(serializers.Serializer):
     dislike_count = serializers.IntegerField()
 
 
+class ViewResultSerializer(serializers.Serializer):
+    """What `view` returns: the tally as it now stands.
+
+    Returned so the reader's page can settle its own counter without a second
+    fetch — the byline renders the number the detail request carried, which is
+    one behind by the time this response lands.
+    """
+
+    view_count = serializers.IntegerField()
+
+
 class ReactionRequestSerializer(serializers.Serializer):
     """Body of `POST /api/articles/<slug>/react/`.
 
@@ -255,7 +267,7 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Article
         fields = [
-            'id', 'title', 'slug', 'excerpt', 'featured_image', 'content', 'category', 'tags',
+            'id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'content', 'category', 'tags',
             'code_snippets', 'author', 'is_published', 'is_featured', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

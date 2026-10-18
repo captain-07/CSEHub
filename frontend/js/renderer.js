@@ -386,6 +386,175 @@ export function formatDate(value) {
 }
 
 /**
+ * Reader-facing view tally, pluralised.
+ *
+ * Shared so the card and the article page cannot disagree about "1 view" versus
+ * "1 views". The locale is pinned to `en-US` for the thousands separator, for
+ * the same reason `formatDate` pins `en`: the surrounding copy is English, and
+ * a browser set to German would otherwise render "1.204 views" mid-sentence.
+ */
+export function formatViews(count) {
+  const total = Number(count) || 0;
+  return `${total.toLocaleString('en-US')} ${total === 1 ? 'view' : 'views'}`;
+}
+
+/*
+ * The providers this site will frame inline, and what a valid id looks like for
+ * each. The id is the *only* thing taken from a pasted URL: the frame's source is
+ * rebuilt from these templates, so a URL that points somewhere else can never
+ * become the `src`. Anything unrecognised degrades to a plain link instead.
+ */
+const YOUTUBE_HOSTS = new Set([
+  'youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com',
+  'youtube-nocookie.com', 'www.youtube-nocookie.com', 'youtu.be',
+]);
+const VIMEO_HOSTS = new Set(['vimeo.com', 'www.vimeo.com', 'player.vimeo.com']);
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{6,20}$/;
+const VIMEO_ID = /^\d{5,12}$/;
+
+/** Pulls the video id out of the several URL shapes YouTube hands out. */
+function youTubeVideoId(url) {
+  const explicit = url.searchParams.get('v');
+  if (explicit && YOUTUBE_ID.test(explicit)) return explicit;
+
+  const segments = url.pathname.split('/').filter(Boolean);
+  // /embed/, /shorts/, /live/ and /v/ put the id second; youtu.be/<id> puts it
+  // first, as does a bare youtube.com/<id> (which does not resolve, but parses).
+  const candidate = ['embed', 'shorts', 'live', 'v'].includes(segments[0])
+    ? segments[1]
+    : segments[0];
+  return candidate && YOUTUBE_ID.test(candidate) ? candidate : '';
+}
+
+/** Vimeo puts the id last, except on the player host, where it follows /video. */
+function vimeoVideoId(url) {
+  const segments = url.pathname.split('/').filter(Boolean);
+  const candidate = segments[0] === 'video' ? segments[1] : segments[segments.length - 1];
+  return candidate && VIMEO_ID.test(candidate) ? candidate : '';
+}
+
+/**
+ * Classifies a pasted video URL.
+ *
+ * Resolves to `null` when there is nothing to show, `{provider, id, src}` when
+ * the URL is a video on a provider this site is willing to frame, and
+ * `{provider: null, href}` for anything else — the caller renders that last case
+ * as a link, never as an embed.
+ *
+ * Parsed without a base on purpose: a video link has to be absolute, and
+ * resolving a relative or blank string against the site would turn a typo into a
+ * link pointing at our own origin.
+ */
+export function videoEmbed(candidate) {
+  if (typeof candidate !== 'string') return null;
+
+  let url;
+  try {
+    url = new URL(candidate.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+
+  const host = url.hostname.toLowerCase();
+
+  if (YOUTUBE_HOSTS.has(host)) {
+    const id = youTubeVideoId(url);
+    if (id) {
+      return {
+        provider: 'YouTube',
+        id,
+        // The nocookie host serves the same player without setting tracking
+        // cookies before playback, which is the point of the facade below.
+        src: `https://www.youtube-nocookie.com/embed/${id}`,
+      };
+    }
+  }
+
+  if (VIMEO_HOSTS.has(host)) {
+    const id = vimeoVideoId(url);
+    if (id) {
+      return { provider: 'Vimeo', id, src: `https://player.vimeo.com/video/${id}` };
+    }
+  }
+
+  return { provider: null, href: url.href };
+}
+
+/**
+ * The "watch this" panel for an article's optional video.
+ *
+ * A recognised provider renders as a facade: inert markup with a play button,
+ * and the iframe is only built when a reader presses it (`bindVideoFacades`), so
+ * a reader who never plays pays for neither the provider's scripts nor its
+ * cookies. Anything that cannot be embedded renders as an outbound link — never
+ * a frame, because the frame's source would then be an unvetted URL.
+ */
+export function videoMarkup(videoUrl, { title = '' } = {}) {
+  const video = videoEmbed(videoUrl);
+  if (!video) return '';
+
+  const label = video.provider ? `Watch on ${video.provider}` : 'Watch the video';
+
+  if (!video.src) {
+    return `
+      <aside class="article-video article-video-external">
+        <span class="article-video-heading">Video</span>
+        <a class="article-video-link" href="${escapeHtml(video.href)}" target="_blank" rel="noopener noreferrer">
+          ${escapeHtml(label)} →
+        </a>
+      </aside>`;
+  }
+
+  return `
+    <aside class="article-video" data-video-embed data-video-src="${escapeHtml(video.src)}"
+      data-video-title="${escapeHtml(title || label)}">
+      <button class="article-video-facade" type="button" data-video-play>
+        <span class="article-video-play" aria-hidden="true"></span>
+        <span class="article-video-facade-text">
+          <strong>${escapeHtml(label)}</strong>
+          <span>The player loads from ${escapeHtml(video.provider)} when you press play.</span>
+        </span>
+      </button>
+    </aside>`;
+}
+
+/**
+ * Turns the facades `videoMarkup` rendered into real players, on click.
+ *
+ * The iframe is built with `createElement` and the source assigned as a
+ * property, so the embed URL is never re-parsed as markup. That URL is only ever
+ * the one `videoEmbed` assembled from a validated id — a stored URL cannot reach
+ * the frame directly, however it was written.
+ */
+export function bindVideoFacades(root = document) {
+  root.querySelectorAll('[data-video-embed]').forEach((panel) => {
+    const button = panel.querySelector('[data-video-play]');
+    if (!button) return;
+
+    button.addEventListener('click', () => {
+      const src = panel.dataset.videoSrc;
+      if (!src) return;
+
+      const frame = document.createElement('iframe');
+      frame.className = 'article-video-frame';
+      frame.setAttribute('src', src);
+      frame.setAttribute('title', panel.dataset.videoTitle || 'Video player');
+      frame.setAttribute('loading', 'lazy');
+      frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+      frame.setAttribute(
+        'allow',
+        'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
+      );
+      frame.setAttribute('allowfullscreen', '');
+
+      // Replaces the facade, so the button cannot be pressed a second time.
+      panel.replaceChildren(frame);
+    }, { once: true });
+  });
+}
+
+/**
  * Shared article card markup, so the home page and the listing page render
  * identical cards and cannot drift apart.
  */
@@ -401,6 +570,8 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   const rt = article.reading_time || readingTime(article.content);
   // Only surfaced once an article has earned one; a "0" on every card is noise.
   const likes = Number(article.like_count) || 0;
+  // Same rule for reads: an unread article says nothing rather than "0 views".
+  const views = Number(article.view_count) || 0;
 
   return `
     <article class="article-card${featured ? ' article-card-featured' : ''}">
@@ -415,6 +586,9 @@ export function articleCardMarkup(article, { featured = false } = {}) {
           ${rt ? `<span aria-hidden="true">&middot;</span><span>${escapeHtml(rt)}</span>` : ''}
           ${likes > 0
             ? `<span aria-hidden="true">&middot;</span><span class="card-likes">&#128077; ${likes}</span>`
+            : ''}
+          ${views > 0
+            ? `<span aria-hidden="true">&middot;</span><span class="card-views">&#128065; ${escapeHtml(formatViews(views))}</span>`
             : ''}
           ${featured ? '<span class="badge">Featured</span>' : ''}
         </p>
@@ -435,4 +609,24 @@ export function messageStateMarkup({ title, message, actionHref, actionLabel, ic
       ${message ? `<p>${escapeHtml(message)}</p>` : ''}
       ${actionHref ? `<a class="button button-secondary" href="${escapeHtml(actionHref)}">${escapeHtml(actionLabel || 'Continue')}</a>` : ''}
     </div>`;
+}
+
+/**
+ * Placeholder grid shown while a card listing is loading, so the page keeps its
+ * finished shape (skeleton) rather than collapsing to a spinner. Count matches
+ * the rendered grid's typical density; without images the media strip stays
+ * out (same rule real cards follow).
+ */
+export function skeletonCardsMarkup({ count = 6, withImage = true } = {}) {
+  const card = `
+    <article class="skeleton-card" aria-hidden="true">
+      ${withImage ? '<div class="skeleton skeleton-media"></div>' : ''}
+      <div class="article-card-body">
+        <div class="skeleton skeleton-line skeleton-line-1"></div>
+        <div class="skeleton skeleton-line skeleton-line-title skeleton-line-2"></div>
+        <div class="skeleton skeleton-line skeleton-line-3"></div>
+        <div class="skeleton skeleton-line skeleton-line-4"></div>
+      </div>
+    </article>`;
+  return `<div class="article-grid">${card.repeat(count)}</div>`;
 }

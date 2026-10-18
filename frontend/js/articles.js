@@ -14,7 +14,7 @@
 import { getArticles, getCategories, getTags, normalizePage } from './api/articles.js';
 import { ApiError } from './api.js';
 import { initNavbar } from './navbar.js';
-import { articleCardMarkup, escapeHtml, messageStateMarkup } from './renderer.js';
+import { articleCardMarkup, escapeHtml, messageStateMarkup, skeletonCardsMarkup } from './renderer.js';
 
 const PAGE_SIZE_HINT = 20;
 
@@ -117,6 +117,7 @@ function emptyStateMarkup(filters) {
 function failureMarkup(message) {
   return `
     <div class="empty-state" role="alert">
+      <span class="empty-state-icon" aria-hidden="true">📡</span>
       <h2>Unable to load articles</h2>
       <p>${escapeHtml(message)}</p>
       <button class="button button-primary" id="retry-btn" type="button">Try again</button>
@@ -185,55 +186,20 @@ function populateTagSelect(select, tags, categories, currentValue, allLabel, cat
   select.value = currentValue || '';
 }
 
-async function initLibrary() {
-  const filters = readFilters();
-  const contentArea = document.querySelector('#content-area');
-  const filterForm = document.querySelector('#filters');
+/** Assigned by initLibrary; the chips rendered by renderLibrary call it. */
+let applyFilters = null;
 
-  if (contentArea) contentArea.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Loading articles…</div>';
+/**
+ * Runs one library fetch-and-render cycle.
+ *
+ * Every filter interaction (form changes, chips, pagination, back/forward)
+ * funnels through here with a token, so only the most recent request may touch
+ * the DOM — a badly timed response can never overwrite a fresher one.
+ */
+async function renderLibrary(filters, { requestToken, contentArea, filterForm } = {}) {
+  const token = ++requestToken.value;
 
-  /** Applies a filter change by navigating, which keeps the URL shareable. */
-  const applyFilters = (overrides) => {
-    const next = { ...filters, page: 1, ...overrides };
-    const params = toUrlParams(next, { includePage: false });
-    window.location.href = `articles.html${params.toString() ? `?${params.toString()}` : ''}`;
-  };
-
-  if (filterForm) {
-    filterForm.elements.search.value = filters.search;
-    filterForm.elements.ordering.value = filters.ordering;
-
-    // A search field is more useful submitting itself than requiring a click,
-    // but only after a pause so each keystroke is not a request.
-    let searchTimer = null;
-    filterForm.elements.search.addEventListener('input', (event) => {
-      clearTimeout(searchTimer);
-      const value = event.target.value;
-      searchTimer = setTimeout(() => applyFilters({ search: value.trim() }), 450);
-    });
-
-    filterForm.elements.category.addEventListener('change', (event) => {
-      applyFilters({ category: event.target.value, tag: '' });
-    });
-    filterForm.elements.tag.addEventListener('change', (event) => {
-      applyFilters({ tag: event.target.value });
-    });
-    filterForm.elements.ordering.addEventListener('change', (event) => {
-      applyFilters({ ordering: event.target.value });
-    });
-
-    // Kept for the explicit Apply button (and for Enter inside the text input).
-    filterForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      clearTimeout(searchTimer);
-      applyFilters({
-        search: filterForm.elements.search.value.trim(),
-        category: filterForm.elements.category.value,
-        tag: filterForm.elements.tag.value,
-        ordering: filterForm.elements.ordering.value,
-      });
-    });
-  }
+  if (contentArea) contentArea.innerHTML = skeletonCardsMarkup({ count: 6 });
 
   try {
     // Taxonomy is only needed for the dropdowns and the filter chips, so a
@@ -244,10 +210,13 @@ async function initLibrary() {
       getArticles(toApiQuery(filters)),
     ]);
 
+    if (token !== requestToken.value) return;
+
     populateSelect(filterForm?.elements.category, categories, filters.category, 'All categories');
     // The tag list follows the category filter: pick "DSA" and only DSA's tags
     // are offered.
     populateTagSelect(filterForm?.elements.tag, tags, categories, filters.tag, 'All topics', filters.category);
+    syncFilterForm(filterForm, filters);
 
     const page = normalizePage(articleData);
     if (!contentArea) return;
@@ -289,13 +258,107 @@ async function initLibrary() {
     });
   } catch (error) {
     console.error('Failed to load library data:', error);
-    if (!contentArea) return;
+    if (token !== requestToken.value || !contentArea) return;
     const message = error instanceof ApiError
       ? error.message
       : 'Something unexpected happened while retrieving articles.';
     contentArea.innerHTML = failureMarkup(message);
-    document.querySelector('#retry-btn')?.addEventListener('click', () => window.location.reload());
+    document.querySelector('#retry-btn')?.addEventListener('click', () => {
+      renderLibrary(readFilters(), { requestToken, contentArea, filterForm });
+    });
   }
+}
+
+/** Form values follow the URL (they are the ones out of date on back/forward). */
+function syncFilterForm(filterForm, filters) {
+  if (!filterForm) return;
+  const search = filterForm.elements.search;
+  // Do not stomp on a search being typed: only overwrite when the field is
+  // idle (not focused), or focused elsewhere entirely.
+  if (document.activeElement !== search && search.value !== filters.search) {
+    search.value = filters.search;
+  }
+  filterForm.elements.ordering.value = filters.ordering;
+  filterForm.elements.category.value = filters.category || '';
+  filterForm.elements.tag.value = filters.tag || '';
+}
+
+function initLibrary() {
+  const contentArea = document.querySelector('#content-area');
+  const filterForm = document.querySelector('#filters');
+  const requestToken = { value: 0 };
+
+  /**
+   * Applies a filter change by updating the URL via pushState and re-rendering
+   * in place — the URL stays the shareable source of truth, but the page no
+   * longer reloads and loses scroll position.
+   */
+  applyFilters = (overrides) => {
+    const next = { ...readFilters(), page: 1, ...overrides };
+    const params = toUrlParams(next, { includePage: false });
+    const url = `articles.html${params.toString() ? `?${params.toString()}` : ''}`;
+    window.history.pushState({}, '', url);
+    renderLibrary(next, { requestToken, contentArea, filterForm });
+    // Landing at the top of the results makes the change visible; "instant"
+    // skips the smooth animation which would fight repeated edits.
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
+  if (filterForm) {
+    // A search field is more useful submitting itself than requiring a click,
+    // but only after a pause so each keystroke is not a request.
+    let searchTimer = null;
+    filterForm.elements.search.addEventListener('input', (event) => {
+      clearTimeout(searchTimer);
+      const value = event.target.value;
+      searchTimer = setTimeout(() => applyFilters({ search: value.trim() }), 450);
+    });
+
+    filterForm.elements.category.addEventListener('change', (event) => {
+      applyFilters({ category: event.target.value, tag: '' });
+    });
+    filterForm.elements.tag.addEventListener('change', (event) => {
+      applyFilters({ tag: event.target.value });
+    });
+    filterForm.elements.ordering.addEventListener('change', (event) => {
+      applyFilters({ ordering: event.target.value });
+    });
+
+    // Kept for the explicit Apply button (and for Enter inside the text input).
+    filterForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      clearTimeout(searchTimer);
+      applyFilters({
+        search: filterForm.elements.search.value.trim(),
+        category: filterForm.elements.category.value,
+        tag: filterForm.elements.tag.value,
+        ordering: filterForm.elements.ordering.value,
+      });
+    });
+  }
+
+  // Cards, chips and pagination carry real `articles.html?…` hrefs, so they
+  // work before hydration and on a failed script too — here we just intercept
+  // those navigations to keep them in-page.
+  contentArea?.addEventListener('click', (event) => {
+    const anchor = event.target.closest('a[href]');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href || !href.startsWith('articles.html')) return;
+    event.preventDefault();
+    window.history.pushState({}, '', href);
+    renderLibrary(readFilters(), { requestToken, contentArea, filterForm });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  });
+
+  // Back/forward must re-render from the URL the browser moved to.
+  window.addEventListener('popstate', () => {
+    const filters = readFilters();
+    renderLibrary(filters, { requestToken, contentArea, filterForm });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  });
+
+  renderLibrary(readFilters(), { requestToken, contentArea, filterForm });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

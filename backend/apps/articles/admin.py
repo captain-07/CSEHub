@@ -40,7 +40,7 @@ class ArticleTagInline(admin.TabularInline):
 @admin.register(Article)
 class ArticleAdmin(admin.ModelAdmin):
     list_display = ['title', 'category', 'author', 'is_published', 'is_featured',
-                    'like_count', 'dislike_count', 'created_at']
+                    'like_count', 'dislike_count', 'view_count', 'created_at']
     list_filter = ['category', 'is_published', 'is_featured']
     # `content` is a JSONField, which has no text lookup — searching it raises
     # FieldError, so the admin searches the human-readable text fields instead.
@@ -52,7 +52,11 @@ class ArticleAdmin(admin.ModelAdmin):
     # The tallies are maintained by ArticleReactionManager. Editable here only
     # because an admin may legitimately want to correct a drifted counter; the
     # repair hatch is `manage.py recompute_reaction_counts`.
-    readonly_fields = ['created_at', 'updated_at']
+    #
+    # `view_count` is read-only instead: nothing in the database records the
+    # individual views, so a hand-edit here could never be derived again or
+    # checked against anything. It is a tally, not a field.
+    readonly_fields = ['created_at', 'updated_at', 'view_count']
 
     def get_queryset(self, request):
         """Mirror the API: a non-superuser admin manages only their own articles.

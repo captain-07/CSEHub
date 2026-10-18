@@ -55,6 +55,12 @@ class Article(models.Model):
     content = models.JSONField(default=dict)
     excerpt = models.TextField(blank=True)
     featured_image = models.URLField(blank=True)
+    # Optional "watch this" video for the article. Article-level rather than a
+    # content block on purpose: it is one per article, and a URLField cannot
+    # carry markup into the page the way a free-form embed block could. The
+    # reader builds the player from a validated video id — see `videoEmbed()` in
+    # renderer.js — so the stored string is never used as a frame source.
+    video_url = models.URLField(blank=True)
     category = models.ForeignKey(
         Category,
         on_delete=models.SET_NULL,
@@ -85,6 +91,11 @@ class Article(models.Model):
     # and `recompute_reaction_counts` exists as a repair hatch.
     like_count = models.PositiveIntegerField(default=0)
     dislike_count = models.PositiveIntegerField(default=0)
+    # Reads, counted one per reader session by the client. Stored for the same
+    # reason as the tallies above, but it is the one counter with no underlying
+    # rows: a view is an event, so there is nothing to recompute from and no
+    # repair command — only `Article.record_view` may write it.
+    view_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -97,6 +108,23 @@ class Article(models.Model):
 
     def __str__(self):
         return self.title
+
+    def record_view(self):
+        """Count one read of this article and return the new total.
+
+        The only writer of `view_count`. `F()` keeps the increment in the
+        database, so two readers arriving together cannot lose a view to a
+        read-modify-write race — the same reason the reaction tallies are
+        adjusted with an expression rather than a Python addition.
+
+        Deduplication is deliberately *not* done here: without a stored row per
+        view there is no key to deduplicate on, and the client already refuses
+        to send a second request for an article it has counted this session.
+        """
+        Article.objects.filter(pk=self.pk).update(view_count=F('view_count') + 1)
+        # The update bypassed this instance, so its copy is stale.
+        self.refresh_from_db(fields=['view_count'])
+        return self.view_count
 
 
 class ArticleTag(models.Model):

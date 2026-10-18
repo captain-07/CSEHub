@@ -14,6 +14,8 @@ import { escapeHtml } from './renderer.js';
 let activeArticleSlug = null;
 let activeArticleTitle = '';
 let busy = false;
+/** Element to hand focus back to when the drawer closes. */
+let previouslyFocused = null;
 
 export async function openChatForArticle(slug, title) {
   activeArticleSlug = slug;
@@ -27,6 +29,9 @@ export async function openChatForArticle(slug, title) {
     window.location.href = `login.html?redirect=${encodeURIComponent(here)}`;
     return;
   }
+
+  // Moved focus came here (e.g. the AI CTA button); close() sends it back.
+  previouslyFocused = document.activeElement;
 
   ensureChatElementsCreated();
   setArticleTitle(title);
@@ -47,6 +52,11 @@ function setDrawerOpen(isOpen) {
     // Move focus into the drawer so keyboard and screen-reader users are not
     // left behind on the article.
     document.querySelector('#chat-input')?.focus();
+  } else {
+    // Focus restore: the control that opened the drawer regains the keyboard,
+    // so Tab continues from where the reader left the page.
+    previouslyFocused?.focus?.();
+    previouslyFocused = null;
   }
 }
 
@@ -91,7 +101,28 @@ function ensureChatElementsCreated() {
   drawer.querySelector('#chat-close-btn').addEventListener('click', close);
   overlay.addEventListener('click', close);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') close();
+    if (event.key !== 'Escape' || !drawer.classList.contains('open')) return;
+    close();
+  });
+
+  // Focus containment: with a modal drawer open, Tab must not wander into the
+  // article behind it. Cycles between the first and last focusable elements.
+  drawer.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab') return;
+    const focusable = [...drawer.querySelectorAll(
+      'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])'
+    )].filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   drawer.querySelector('#chat-form').addEventListener('submit', async (event) => {

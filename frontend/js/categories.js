@@ -5,8 +5,46 @@ import { escapeHtml, messageStateMarkup } from './renderer.js';
 const grid = document.querySelector('#category-grid');
 const tagCloud = document.querySelector('#tag-cloud');
 
-function plural(count, singular, pluralForm) {
-  return `${count} ${count === 1 ? singular : pluralForm}`;
+const COUNTS_CACHE_KEY = 'csehub-category-counts';
+const COUNTS_CACHE_TTL = 10 * 60 * 1000; // ms
+
+const plural = (count, singular, pluralForm) => `${count} ${count === 1 ? singular : pluralForm}`;
+
+/**
+ * Per-category article counts, cached in sessionStorage.
+ *
+ * The tally needs the whole library (~one request per page), so the result is
+ * remembered per browser tab for a few minutes — revisits within that window
+ * render instantly and re-issuing the request on every navigation is not
+ * expected of a browse page.
+ */
+async function loadCategoryCounts() {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(COUNTS_CACHE_KEY) || 'null');
+    if (cached && Date.now() - cached.savedAt < COUNTS_CACHE_TTL) {
+      return new Map(Object.entries(cached.counts).map(([id, value]) => [Number(id), value]));
+    }
+  } catch {
+    // Corrupt cache is the same as no cache.
+  }
+
+  try {
+    const articles = await getAllPages('/articles/?ordering=-created_at&is_published=true');
+    const counts = {};
+    articles.forEach((article) => {
+      const id = article.category?.id;
+      if (id) counts[id] = (counts[id] || 0) + 1;
+    });
+    try {
+      sessionStorage.setItem(COUNTS_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), counts }));
+    } catch {
+      // Storage may be full or blocked; the page still works without caching.
+    }
+    return new Map(Object.entries(counts).map(([id, value]) => [Number(id), value]));
+  } catch (error) {
+    console.warn('Article counts unavailable', error);
+    return null;
+  }
 }
 
 /**
@@ -33,7 +71,12 @@ async function loadCategories() {
   grid.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Loading categories…</div>';
 
   try {
-    const categories = await getCategories();
+    // The grid and its counts are independent requests, so they go out
+    // together rather than in series — the counts are the slow part here.
+    const [categories, counts] = await Promise.all([
+      getCategories(),
+      loadCategoryCounts().catch(() => null),
+    ]);
     if (!categories.length) {
       grid.innerHTML = messageStateMarkup({
         title: 'No categories yet',
@@ -45,19 +88,6 @@ async function loadCategories() {
     // `null`, not an empty Map: a failed count request has to be
     // distinguishable from a genuine zero, or every category reads "0 articles"
     // as though it were true. See `countMarkup`.
-    let counts = null;
-    try {
-      const articles = await getAllPages('/articles/?ordering=-created_at&is_published=true');
-      counts = new Map();
-      articles.forEach((article) => {
-        const id = article.category?.id;
-        if (id) counts.set(id, (counts.get(id) || 0) + 1);
-      });
-    } catch (error) {
-      // Counts are supplementary: the grid is still useful without them, but it
-      // must not state a number it does not have.
-      console.warn('Article counts unavailable', error);
-    }
 
     grid.innerHTML = categories
       .map((category) => `

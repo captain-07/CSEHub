@@ -90,6 +90,23 @@ export function reactToArticle(id, value) {
   });
 }
 
+/* -------------------------------------------------------------------- views */
+
+/**
+ * Records one read of an article and resolves to `{ view_count }`.
+ *
+ * A POST rather than a side effect of `getArticle`: that request also serves the
+ * admin editor, so counting on it would tally an editor's own previews as
+ * traffic, and a GET that writes is a surprise for every other consumer.
+ *
+ * The server does not deduplicate. The caller is responsible for sending this
+ * once per reader session — see `recordViewOnce` in article.js — so this is a
+ * counter, not an audit log.
+ */
+export function recordArticleView(id) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/view/`, { method: 'POST' });
+}
+
 /**
  * Follows DRF's `next` links and concatenates every page.
  *

@@ -6,6 +6,23 @@
     <meta name="description" content="CSEHub — practical computer science articles on data structures, algorithms, systems, databases and languages, with runnable code examples." />
     <title>CSEHub — Learn Computer Science. Build Strong Foundations.</title>
 
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- Theme bootstrap: runs before first paint so the initial render already
+         carries the right palette (no flash of the wrong theme). js/theme.js
+         takes over from here. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('csehub-theme');
+          var dark = stored ? stored === 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        } catch (error) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+
     <!-- Open Graph. js/article.js rewrites these for a single article page. -->
     <meta property="og:site_name" content="CSEHub" />
     <meta property="og:title" content="CSEHub — Learn Computer Science" />
@@ -21,6 +38,7 @@
     <link rel="stylesheet" href="css/articles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#app">Skip to content</a>
     <!-- Dynamically loaded header -->
     <header class="site-header"></header>
 

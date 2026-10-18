@@ -77,8 +77,8 @@
 }
 
 .badge-staff {
-  background-color: #fef3c7;
-  color: #92400e;
+  background-color: var(--warning-soft);
+  color: var(--warning);
 }
 
 .badge-reader {
@@ -121,7 +121,7 @@
   font-size: var(--text-sm);
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .profile-wrapper {
     margin: 2rem auto;
   }

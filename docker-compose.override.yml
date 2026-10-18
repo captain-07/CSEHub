@@ -1,0 +1,20 @@
+# Development override, merged automatically by a bare `docker compose up`.
+#
+#   docker compose up                          # dev: source mounted, autoreload
+#   docker compose -f docker-compose.yml up    # production-shaped, no override
+#
+# The whole backend tree is bind-mounted so edits reload without a rebuild.
+# Mounting it also shadows the static files collected into the image, which is
+# why COLLECTSTATIC_ON_START is set: it rebuilds the manifest at startup.
+
+services:
+  backend:
+    command: python backend/manage.py runserver 0.0.0.0:8000
+    environment:
+      DEBUG: "True"
+      COLLECTSTATIC_ON_START: "true"
+      # Sample content makes a fresh dev database usable immediately.
+      SEED_ON_START: ${SEED_ON_START:-true}
+    volumes:
+      - ./backend:/app/backend
+      - media-data:/app/backend/media

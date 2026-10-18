@@ -28,6 +28,7 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
   - [Seeding Data](#seeding-data)
   - [Article Ingestion](#article-ingestion)
   - [Running Tests](#running-tests)
+- [Docker](#docker)
 - [Project Structure](#project-structure)
   - [Frontend architecture](#frontend-architecture)
 - [API Endpoints](#api-endpoints)
@@ -47,7 +48,9 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 
 - **Article library** — Browse, search, filter by category and tag (the tag choices follow the selected category), sort, and paginate published articles
 - **Long-form reading view** — Sanitized Editor.js rendering with copyable code blocks, images, and related articles
+- **Optional video** — An article can carry one YouTube or Vimeo link, played inline above the body; any other link is shown as a plain link rather than an embedded frame, and a provider's player is only fetched once a reader presses play
 - **Category browser** — Subject index with live article counts, plus a tag cloud grouped by category
+- **Read counts** — Every article shows how many times it has been read, counted once per reader session so a refresh cannot inflate it, and never by the author's own visits
 - **AI article assistant** — Authenticated RAG chatbot (Pinecone + Gemini) scoped to a single article: answers from the article, and explains jargon the article assumes without defining, with persisted conversation history
 - **Supabase Google OAuth** — "Continue with Google" sign-in; the API auto-provisions a local `User` from a valid Bearer token
 - **User profile** — `GET`/`PATCH /api/me/` for display name, username, and avatar
@@ -58,7 +61,8 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 - **Server-enforced publishing** — Every write is gated on Django's `is_staff`; the frontend's `is_admin` mirrors it and is read-only
 - **Admin guard** — `/admin` is a UX gate only; a non-editor calling `POST /api/articles/` directly still gets a `403`
 - **Editor.js authoring** — Heading, paragraph, list, quote, code, image, link, and delimiter blocks stored as structured JSON
-- **Dashboard and article list** — Real counts (published / drafts / total), search, status filter, and pagination
+- **Article media** — A featured image URL plus an optional video URL per article, both externally hosted links
+- **Dashboard and article list** — Real counts (published / drafts / total articles / total views), a per-article read tally, search, status filter, and pagination
 - **Taxonomy management** — Create and delete categories and tags
 - **Preview before publishing** — Renders the unsaved document through the same renderer the public page uses
 - **Explicit RAG indexing** — Publishing never blocks on an embedding call; admins trigger it, or run `manage.py ingest_articles`
@@ -78,6 +82,7 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 | **Editor**         | Editor.js (heading, list, quote, code, image, link, delimiter) |
 | **API Docs**       | drf-spectacular (OpenAPI 3.0, Swagger, ReDoc)    |
 | **RAG Pipeline**   | LangChain + Pinecone (vector DB) + Google Gemini |
+| **Containers**     | Docker + Compose (Gunicorn, nginx, PostgreSQL 16) |
 | **Backend deploy** | Render (Gunicorn + WhiteNoise)                   |
 | **Frontend**       | Static HTML, CSS, and ES modules on Vercel       |
 
@@ -101,6 +106,7 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 - PostgreSQL (local or remote)
 - Supabase project (JWT auth)
 - Pinecone index and Google Gemini API key (required only for ingestion and chatbot use)
+- Docker Desktop (optional) — needed only for the [Docker](#docker) stack below, which requires none of the runtimes above on the host
 
 
 
@@ -321,6 +327,58 @@ What the suite covers:
 
 
 
+## Docker
+
+The full stack — PostgreSQL 16, the Django/Gunicorn API, and nginx serving `frontend/` — runs with one command. Nothing but Docker is needed on the host.
+
+```bash
+# Same env file as the native setup; the stack reads it for secrets
+cp backend/.env.example backend/.env
+
+# Development: source bind-mounted, runserver + autoreload, seeded database
+docker compose up --build
+
+# Production-shaped: Gunicorn + collected static, no source mount
+docker compose -f docker-compose.yml up --build
+```
+
+| Service    | URL                     | Notes                                                |
+| ---------- | ----------------------- | ---------------------------------------------------- |
+| `frontend` | `http://localhost:3000`  | nginx serving `frontend/` read-only                  |
+| `backend`  | `http://localhost:8000`  | Gunicorn, or `runserver` under the dev override      |
+| `db`       | –                        | PostgreSQL 16; data lives in the `postgres-data` volume |
+
+`docker-compose.override.yml` is merged automatically, so a bare `docker compose up` is the **development** stack: `backend/` is bind-mounted with autoreload and the database is seeded. Pass `-f docker-compose.yml` explicitly on a server so the override is not picked up.
+
+### Configuration
+
+| Source                                  | Carries                          | Examples                                                                                  |
+| --------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `backend/.env` (via `env_file`)          | Secrets, passed through untouched | `SECRET_KEY`, `SUPABASE_URL`, `CLOUDINARY_*`, `PINECONE_*`, `GEMINI_*`                     |
+| `environment:` in `docker-compose.yml`   | Deployment topology              | `DATABASE_URL`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `DEBUG`, `SECURE_SSL_REDIRECT`    |
+
+The `environment:` block wins over `backend/.env`, deliberately: that is what points the app at the `db` service and at `http://localhost:3000`, and `SECURE_SSL_REDIRECT` is `False` because nothing terminates TLS in front of the stack. Set `USE_REMOTE_STORAGE=False` in `backend/.env` to keep uploaded images in the `media-data` volume instead of Cloudinary.
+
+Ports and credentials are overridable: `BACKEND_PORT`, `FRONTEND_PORT`, and `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`.
+
+### Entrypoint
+
+`docker/docker-entrypoint.sh` runs before the server command:
+
+| Step                       | Default                                                    | Toggle                              |
+| -------------------------- | ---------------------------------------------------------- | ----------------------------------- |
+| `migrate --noinput`        | on                                                         | `RUN_MIGRATIONS=false`              |
+| `collectstatic --noinput`  | off (on in dev, where the bind mount shadows `staticfiles/`) | `COLLECTSTATIC_ON_START=true`     |
+| `seed` (idempotent)        | off                                                        | `SEED_ON_START=true`                |
+
+Seeding is off by default so the image cannot write sample rows into a database it did not create; the dev override turns it on for a usable first run.
+
+The image copies only `requirements.txt`, `backend/` and the entrypoint — `backend/.env`, `backend/media/`, `backend/staticfiles/` and `frontend/` are excluded by `.dockerignore`, so no secret is baked into a layer. Rebuild after changing `requirements.txt` with `docker compose up --build`.
+
+Docker is additive: [Render](#render-production) and Vercel remain the deployed path, and `build.sh` / `Procfile` are unchanged.
+
+---
+
 ## Project Structure
 
 ```
@@ -376,6 +434,13 @@ CSEHub/
 │   │   ├── login.js / profile.js / chat.js
 │   │   └── admin.js               # hash-routed publishing panel
 │   └── vercel.json
+├── docker/
+│   ├── docker-entrypoint.sh       # migrate, optional collectstatic/seed, then exec
+│   └── nginx.conf                 # static server for the compose stack
+├── docker-compose.yml             # PostgreSQL + backend + frontend
+├── docker-compose.override.yml    # dev override: mounted source, autoreload, seed
+├── Dockerfile                     # Python 3.12 + Gunicorn backend image
+├── .dockerignore
 ├── build.sh                       # Production build script
 ├── Procfile                       # Render process declaration
 └── requirements.txt
@@ -412,8 +477,6 @@ One implementation per concern — there is no second router, API client, or art
 ## API Endpoints
 
 
-| Method          | Endpoint                             | Description                                 | Auth          |
-| --------------- | ------------------------------------ | ------------------------------------------- | ------------- |
 | Method          | Endpoint                             | Description                                            | Auth          |
 | --------------- | ------------------------------------ | ------------------------------------------------------ | ------------- |
 | `GET`           | `/api/articles/`                     | List articles (paginated)                              | Public        |
@@ -421,6 +484,8 @@ One implementation per concern — there is no second router, API client, or art
 | `POST`          | `/api/articles/`                     | Create article                                          | Admin         |
 | `PUT` / `PATCH` | `/api/articles/{id}/`                | Update article                                          | Admin         |
 | `DELETE`        | `/api/articles/{id}/`                | Delete article                                          | Admin         |
+| `POST`          | `/api/articles/{slug}/view/`         | Record one read of an article and return the new total | Public        |
+| `POST`          | `/api/articles/{slug}/react/`        | Like, dislike, or clear a reaction                      | Authenticated |
 | `POST`          | `/api/articles/{id}/reindex/`        | Send a published article's text to Pinecone (RAG)       | Admin         |
 | `GET`           | `/api/categories/`                   | List categories                                         | Public        |
 | `POST` / `PUT` / `PATCH` / `DELETE` | `/api/categories/{id}/` | Create / update / delete a category       | Admin         |
@@ -447,7 +512,7 @@ One implementation per concern — there is no second router, API client, or art
 | `category__slug`         | `category__slug=dsa`   | Exact category slug                          |
 | `tags__slug`             | `tags__slug=array`     | Exact tag slug                               |
 | `is_featured`            | `is_featured=true`     | `true` / `false`                             |
-| `ordering`               | `ordering=-created_at` | `-created_at`, `created_at`, `title`, `-title` |
+| `ordering`               | `ordering=-created_at` | `-created_at`, `created_at`, `title`, `-title`, `view_count`, `-view_count` |
 | `page`                   | `page=2`               | Page-number pagination, 20 per page          |
 
 ### Query parameters — `GET /api/tags/`
@@ -620,6 +685,8 @@ Tunable via `IMAGE_MAX_DIMENSION`, `IMAGE_WEBP_QUALITY`, `IMAGE_WEBP_METHOD` in 
 ## Deployment
 
 The backend is configured for Render. The frontend is a static Vercel site (`frontend/vercel.json` enables `cleanUrls`). The active frontend uses `article.html?id=<id>` links consistently.
+
+For a single host, the same stack is available as containers — PostgreSQL, Gunicorn and nginx — see [Docker](#docker) above.
 
 ### Render (Production)
 

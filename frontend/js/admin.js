@@ -25,7 +25,8 @@ import {
 } from './api/articles.js';
 import { ApiError } from './api.js';
 import {
-  renderArticleContent, escapeHtml, safeUrl, formatDate, contentToPlainText, highlightSnippets,
+  renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
+  videoMarkup, bindVideoFacades, highlightSnippets,
 } from './renderer.js';
 import {
   resolveEditorTools, assertDocumentIsEditable, UnsupportedBlocksError,
@@ -175,6 +176,10 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
     const existing = document.querySelector('#confirm-modal');
     if (existing) existing.remove();
 
+    // The trigger regains focus on close, so keyboard users resume where they
+    // left off instead of falling to <body>.
+    const opener = document.activeElement;
+
     const modal = document.createElement('div');
     modal.id = 'confirm-modal';
     modal.className = 'modal-backdrop';
@@ -193,10 +198,12 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
     const close = (result) => {
       modal.remove();
       document.removeEventListener('keydown', onKey);
+      opener?.focus?.();
       resolve(result);
     };
     const onKey = (event) => {
       if (event.key === 'Escape') close(false);
+      if (event.key === 'Tab') trapFocus(modal, event);
     };
 
     document.body.appendChild(modal);
@@ -208,6 +215,28 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
     document.addEventListener('keydown', onKey);
     modal.querySelector('[data-confirm]').focus();
   });
+}
+
+/**
+ * Keeps Tab circulating inside a modal: shifts the browser's default target to
+ * the first (or last) focusable element whenever it would leave the container.
+ * Modals are appended to <body>, so Tab would otherwise escape into the page.
+ */
+function trapFocus(modal, event) {
+  const focusable = [...modal.querySelectorAll(
+    'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter((el) => !el.disabled);
+  if (!focusable.length) return;
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 async function notify(title, message, kind = 'info') {
@@ -390,6 +419,7 @@ function articleRow(article) {
         ${article.is_featured ? '<span class="badge">Featured</span>' : ''}
       </td>
       <td>${escapeHtml(article.category?.name || 'General')}</td>
+      <td class="admin-views">${escapeHtml(formatViews(article.view_count))}</td>
       <td>${escapeHtml(formatDate(article.updated_at))}</td>
       <td class="admin-actions">
         <a class="button button-secondary" href="#/articles/${article.id}/edit">Edit</a>
@@ -413,6 +443,9 @@ function bindArticleRowActions(root) {
 
 function dashboardMarkup({ articles, total }) {
   const published = articles.filter((a) => a.is_published).length;
+  // Read off the same full scan as `total`, so the card cannot disagree with the
+  // per-article numbers in the table below it.
+  const views = articles.reduce((sum, article) => sum + (Number(article.view_count) || 0), 0);
   const recent = articles.slice(0, 8);
 
   return `
@@ -430,6 +463,7 @@ function dashboardMarkup({ articles, total }) {
       ${statCard('Published', published)}
       ${statCard('Drafts', total - published)}
       ${statCard('Categories', taxonomy.categories.length)}
+      ${statCard('Total views', views.toLocaleString('en-US'))}
     </section>
 
     <section class="admin-panel">
@@ -440,9 +474,9 @@ function dashboardMarkup({ articles, total }) {
       <div class="admin-table-wrap">
         <table class="admin-table">
           <thead>
-            <tr><th>Title</th><th>Status</th><th>Category</th><th>Updated</th><th>Actions</th></tr>
+            <tr><th>Title</th><th>Status</th><th>Category</th><th>Views</th><th>Updated</th><th>Actions</th></tr>
           </thead>
-          <tbody>${recent.map(articleRow).join('') || '<tr><td colspan="5">No articles yet. Create your first one.</td></tr>'}</tbody>
+          <tbody>${recent.map(articleRow).join('') || '<tr><td colspan="6">No articles yet. Create your first one.</td></tr>'}</tbody>
         </table>
       </div>
     </section>`;
@@ -560,9 +594,9 @@ function articleListMarkup({ page, state, total }) {
       <div class="admin-table-wrap">
         <table class="admin-table">
           <thead>
-            <tr><th>Title</th><th>Status</th><th>Category</th><th>Updated</th><th>Actions</th></tr>
+            <tr><th>Title</th><th>Status</th><th>Category</th><th>Views</th><th>Updated</th><th>Actions</th></tr>
           </thead>
-          <tbody>${page.results.map(articleRow).join('') || '<tr><td colspan="5">No articles match this search.</td></tr>'}</tbody>
+          <tbody>${page.results.map(articleRow).join('') || '<tr><td colspan="6">No articles match this search.</td></tr>'}</tbody>
         </table>
       </div>
       ${total > LIST_PAGE_SIZE ? `
@@ -839,6 +873,12 @@ function articleFormMarkup(article) {
         <span class="field-hint">Link to an externally hosted image. Inline images are uploaded from inside the editor.</span>
       </div>
 
+      <div class="field">
+        <label for="f-video-url">Video URL <span class="field-optional">optional</span></label>
+        <input class="input" id="f-video-url" name="video_url" type="url" value="${escapeHtml(article?.video_url || '')}" placeholder="https://www.youtube.com/watch?v=…" />
+        <span class="field-hint">A YouTube or Vimeo link plays inline above the article; any other link is shown as a plain link. Leave blank for no video.</span>
+      </div>
+
       <div class="form-grid">
         <div class="field">
           <label for="f-category">Category</label>
@@ -1029,6 +1069,7 @@ async function collectPayload() {
     slug: form.slug.value.trim(),
     excerpt,
     featured_image: safeUrl(form.featured_image.value.trim()),
+    video_url: safeUrl(form.video_url.value.trim()),
     category: form.category.value ? Number(form.category.value) : null,
     tags: [...form.tags.selectedOptions].map((option) => Number(option.value)),
     content,
@@ -1114,6 +1155,7 @@ function openPreview() {
 
   collectPayload()
     .then((payload) => {
+      const opener = document.activeElement;
       const modal = document.createElement('div');
       modal.id = 'preview-modal';
       modal.className = 'modal-backdrop';
@@ -1128,6 +1170,7 @@ function openPreview() {
           </header>
           <div class="modal-body">
             ${payload.excerpt ? `<p class="article-excerpt">${escapeHtml(payload.excerpt)}</p>` : ''}
+            ${videoMarkup(payload.video_url, { title: payload.title })}
             <div class="article-content article-preview">${renderArticleContent(payload.content)}</div>
           </div>
         </div>`;
@@ -1138,14 +1181,18 @@ function openPreview() {
       // The preview is rebuilt from the editor's blocks, so the snippets are
       // fresh DOM and must be highlighted after insertion.
       highlightSnippets(modal);
+      // Same for the video facade: it is inert markup until it is wired up.
+      bindVideoFacades(modal);
 
       const close = () => {
         modal.remove();
         document.body.style.overflow = '';
         document.removeEventListener('keydown', onKey);
+        opener?.focus?.();
       };
       const onKey = (event) => {
         if (event.key === 'Escape') close();
+        if (event.key === 'Tab') trapFocus(modal, event);
       };
 
       modal.querySelector('[data-close]').addEventListener('click', close);

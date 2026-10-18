@@ -793,3 +793,210 @@ class ArticleReactionTests(APITestCase):
 
         self.assertEqual(self.counts(), (0, 0))
 
+
+class ArticleViewCountTests(APITestCase):
+    """Reads, counted one per reader session by the client.
+
+    The number is denormalized for the same reason as the reaction tallies, so
+    what matters is that exactly one place writes it and that a client can never
+    set it. Deduplication is *not* tested here: the server keeps no row per view,
+    so there is nothing for it to deduplicate against, and that behaviour lives
+    in the client's `recordViewOnce`. What is pinned instead is the contract it
+    relies on — every request counts, so it has to send exactly one.
+    """
+
+    def setUp(self):
+        self.article = Article.objects.create(
+            title='Public', slug='public', content={'blocks': []}, is_published=True
+        )
+        self.draft = Article.objects.create(
+            title='Draft', slug='draft', content={'blocks': []}, is_published=False
+        )
+        self.staff = get_user_model().objects.create_user(
+            email='staff@example.com', username='staff', password='password', is_staff=True
+        )
+        self.reader = get_user_model().objects.create_user(
+            email='reader@example.com', username='reader', password='password'
+        )
+
+    def count_view(self, slug=None):
+        return self.client.post(f'/api/articles/{slug or self.article.slug}/view/')
+
+    def view_count(self, article=None):
+        article = article or self.article
+        article.refresh_from_db()
+        return article.view_count
+
+    # --- counting ---
+
+    def test_an_anonymous_read_is_counted(self):
+        """Readers are not signed in, so this endpoint must be public."""
+        response = self.count_view()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['view_count'], 1)
+        self.assertEqual(self.view_count(), 1)
+
+    def test_the_article_can_be_addressed_by_id(self):
+        response = self.client.post(f'/api/articles/{self.article.pk}/view/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.view_count(), 1)
+
+    def test_every_request_counts(self):
+        """The endpoint does not deduplicate — that is the client's job. Pinned
+        so the guarantee `recordViewOnce` depends on cannot drift silently."""
+        self.count_view()
+        response = self.count_view()
+        self.assertEqual(response.data['view_count'], 2)
+        self.assertEqual(self.view_count(), 2)
+
+    def test_a_get_does_not_count(self):
+        """The action is POST-only, so a crawler or a prefetch cannot tally."""
+        response = self.client.get(f'/api/articles/{self.article.slug}/view/')
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(self.view_count(), 0)
+
+    def test_an_unpublished_article_cannot_be_counted(self):
+        response = self.count_view(slug=self.draft.slug)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.view_count(self.draft), 0)
+
+    def test_an_unknown_slug_is_not_counted(self):
+        self.assertEqual(self.count_view(slug='does-not-exist').status_code, 404)
+
+    # --- who counts ---
+
+    def test_a_signed_in_reader_still_counts(self):
+        """Only staff are exempt: an ordinary signed-in reader is who the number
+        is for."""
+        self.client.force_authenticate(self.reader)
+        response = self.count_view()
+        self.assertEqual(response.data['view_count'], 1)
+        self.assertEqual(self.view_count(), 1)
+
+    def test_a_staff_read_is_acknowledged_but_not_counted(self):
+        """Otherwise every time an editor opened their own work to check it, the
+        article would report another reader who never existed."""
+        self.client.force_authenticate(self.staff)
+        response = self.count_view()
+        self.assertEqual(response.status_code, 200)
+        # Still answered, so the client settles on the true total rather than
+        # treating the request as a failure.
+        self.assertEqual(response.data['view_count'], 0)
+        self.assertEqual(self.view_count(), 0)
+
+    def test_a_staff_read_reports_the_current_total(self):
+        self.count_view()
+        self.client.force_authenticate(self.staff)
+        self.assertEqual(self.count_view().data['view_count'], 1)
+
+    # --- exposure ---
+
+    def test_the_list_endpoint_exposes_the_count(self):
+        self.count_view()
+        row = self.client.get('/api/articles/').data['results'][0]
+        self.assertEqual(row['view_count'], 1)
+
+    def test_the_detail_endpoint_exposes_the_count(self):
+        self.count_view()
+        response = self.client.get(f'/api/articles/{self.article.slug}/')
+        self.assertEqual(response.data['view_count'], 1)
+
+    def test_articles_can_be_ordered_by_views(self):
+        other = Article.objects.create(
+            title='Other', slug='other', content={'blocks': []}, is_published=True
+        )
+        Article.objects.filter(pk=other.pk).update(view_count=5)
+
+        page = self.client.get('/api/articles/?ordering=-view_count')
+
+        self.assertEqual([row['slug'] for row in page.data['results']], ['other', 'public'])
+
+    def test_the_write_serializer_cannot_set_the_count(self):
+        """It is a tally, not a field. A staff PATCH that carried one would
+        otherwise overwrite the number with whatever the client sent."""
+        Article.objects.filter(pk=self.article.pk).update(author=self.staff)
+        self.client.force_authenticate(self.staff)
+        response = self.client.patch(
+            f'/api/articles/{self.article.slug}/',
+            {'view_count': 9999, 'title': 'Renamed'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.view_count(), 0)
+
+    # --- the single writer ---
+
+    def test_record_view_returns_the_new_total(self):
+        article = Article.objects.get(pk=self.article.pk)
+        self.assertEqual(article.record_view(), 1)
+        # The instance was refreshed, so the caller does not have to re-fetch it
+        # the way `react` has to.
+        self.assertEqual(article.view_count, 1)
+        self.assertEqual(article.record_view(), 2)
+
+    def test_record_view_does_not_count_as_an_edit(self):
+        """`updated_at` is `auto_now`, but the increment goes through
+        `QuerySet.update()`, which bypasses it. If a read bumped the timestamp,
+        every article would look freshly modified the moment anyone opened it."""
+        before = Article.objects.get(pk=self.article.pk).updated_at
+
+        self.article.record_view()
+
+        self.assertEqual(Article.objects.get(pk=self.article.pk).updated_at, before)
+
+
+class ArticleVideoTests(APITestCase):
+    """The optional per-article video link.
+
+    It is an ordinary `URLField` on the article — one video, chosen by the
+    editor, and usually absent. Two things are worth pinning: that it survives
+    the write path at all, and that a non-URL is refused up front. The reader
+    always builds the player from a *derived* embed URL (see `videoEmbed` in
+    renderer.js), so a stored value can never become a frame source on its own,
+    but junk would still surface as a broken link card.
+    """
+
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            email='staff@example.com', username='staff', password='password', is_staff=True
+        )
+        self.article = Article.objects.create(
+            title='With video', slug='with-video', content={'blocks': []}, is_published=True
+        )
+
+    def patch(self, **body):
+        return self.client.patch(
+            f'/api/articles/{self.article.slug}/', body, format='json'
+        )
+
+    def test_the_field_is_optional(self):
+        """Most articles have no video, so the default has to be a blank string
+        rather than null — the reader renders on presence, not on `None`."""
+        response = self.client.get(f'/api/articles/{self.article.slug}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['video_url'], '')
+
+    def test_a_video_url_round_trips_through_a_write(self):
+        self.client.force_authenticate(self.staff)
+        response = self.patch(video_url='https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+
+        self.assertEqual(response.status_code, 200)
+        self.article.refresh_from_db()
+        self.assertEqual(
+            self.article.video_url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        )
+
+    def test_a_non_url_is_rejected(self):
+        self.client.force_authenticate(self.staff)
+        response = self.patch(video_url='javascript:alert(1)')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('video_url', response.data)
+
+    def test_the_list_endpoint_exposes_the_video_url(self):
+        Article.objects.filter(pk=self.article.pk).update(
+            video_url='https://vimeo.com/123456789'
+        )
+        row = self.client.get('/api/articles/').data['results'][0]
+        self.assertEqual(row['video_url'], 'https://vimeo.com/123456789')
+

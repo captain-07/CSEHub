@@ -1,6 +1,11 @@
 /* Shared design system & variables */
 :root {
-  /* Colour — restrained, education-oriented palette */
+  color-scheme: light;
+
+  /* Colour — restrained, education-oriented palette.
+   * Semantic colours come from referenced channels (--accent-rgb, --shade-rgb, …)
+   * so the dark theme only has to re-point those channels plus the flat fills.
+   * Anything hardcoded outside these tokens will silently break dark mode. */
   --bg-primary: #fbfaf6;
   --bg-secondary: #ffffff;
   --text-primary: #17211f;
@@ -8,12 +13,46 @@
   --accent: #27644c;
   --accent-hover: #1d503c;
   --accent-soft: #edf4ee;
+  --accent-soft-hover: #dcece1; /* tag/chip hover fill */
+  --accent-strong: #3a6049; /* accent text on soft fills */
+  --accent-rgb: 39, 100, 76;
+  --shade-rgb: 23, 33, 31; /* neutral-tinted shadows */
+
   --border: #dce1dc;
   --code-bg: #18201e;
-  --shadow: 0 12px 30px rgba(23, 33, 31, 0.07);
+
+  /* Status colours + their washed backgrounds */
   --error: #cc3333;
+  --error-soft: #fdf2f2;
+  --error-border: #f5c2c2;
+  --error-rgb: 204, 51, 51;
   --success: #228b22;
+  --success-soft: #f2fbf2;
+  --success-border: #c2f5c2;
   --warning: #b26a00;
+  --warning-soft: #fdf4e3;
+
+  /* Reaction "dislike" — warm red, independent from --error */
+  --dislike: #c0392b;
+  --dislike-soft: #fdf1f0;
+  --dislike-rgb: 192, 57, 43;
+
+  /* Article body accents */
+  --inline-code-bg: #edf1ee;
+  --inline-code-text: #2a5036;
+  --ai-cta-bg: linear-gradient(135deg, #edf4ee 0%, #e0f0e5 100%);
+  --ai-cta-text: #4a6b58;
+
+  /* Misc … */
+  --spinner-track: #a8b4ad;
+  --google-btn-bg: #ffffff;
+  --google-btn-bg-hover: #f7f6f2;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364716d' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --search-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364716d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
+  --skeleton-base: #eceae3;
+  --skeleton-shine: #f8f7f2;
+
+  --shadow: 0 12px 30px rgba(23, 33, 31, 0.07);
 
   /* Spacing scale — every layout gap should reference one of these */
   --space-3xs: 0.25rem;
@@ -42,7 +81,71 @@
   --radius-md: 7px;
   --radius-lg: 12px;
   --radius-pill: 999px;
-  --focus-ring: 0 0 0 3px rgba(39, 100, 76, 0.28);
+  --focus-ring: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+
+/* Dark theme. Applied on <html> by the inline head script before first paint
+ * (no flash), then managed by js/theme.js. Values are total replacements of the
+ * light tokens above — semantic channels (accent-rgb, shade-rgb, …) keep the
+ * derived colours coherent without touching component files. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-primary: #101615;
+  --bg-secondary: #171f1c;
+  --text-primary: #e8efea;
+  --text-secondary: #9aa8a2;
+  --accent: #63b48f;
+  --accent-hover: #7cc9a3;
+  --accent-soft: rgba(99, 180, 143, 0.14);
+  --accent-soft-hover: rgba(99, 180, 143, 0.24);
+  --accent-strong: #8fd4b2;
+  --accent-rgb: 99, 180, 143;
+  --shade-rgb: 0, 0, 0;
+
+  --border: #2c3833;
+  --code-bg: #131a18; /* nudged darker than the light-mode snippet so it still reads as distinct */
+
+  --error: #ef8080;
+  --error-soft: #341d1d;
+  --error-border: #5a2e2e;
+  --error-rgb: 239, 128, 128;
+  --success: #78c878;
+  --success-soft: #1b2f1b;
+  --success-border: #3b5e3b;
+  --warning: #e0a45c;
+  --warning-soft: #38291a;
+
+  --dislike: #ef8b7e;
+  --dislike-soft: #3a2320;
+  --dislike-rgb: 239, 139, 126;
+
+  --inline-code-bg: #1e2c25;
+  --inline-code-text: #b8f0d4;
+  --ai-cta-bg: linear-gradient(135deg, #182720 0%, #1c2e25 100%);
+  --ai-cta-text: #a8cdc0;
+
+  --spinner-track: #3d4a44;
+  --google-btn-bg: #ffffff; /* stays white — recognised identity */
+  --google-btn-bg-hover: #eef0ef;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239aa8a2' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --search-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa8a2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
+  --skeleton-base: #1d2622;
+  --skeleton-shine: #26312c;
+
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Smooth the theme swap (kept minimal — writes to a hundred properties hurt).
+ * Disabled by prefers-reduced-motion via reset.css. */
+body,
+.site-header,
+.article-card,
+.feature-card,
+.category-card,
+.empty-state,
+.snippet {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
 
 body {
@@ -66,6 +169,25 @@ code, pre, kbd, samp {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Skip link — first focusable element on every page; hidden until focused. */
+.skip-link {
+  position: absolute;
+  top: -3.5rem;
+  left: var(--space-sm);
+  z-index: 2000;
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--radius-md);
+  background-color: var(--accent);
+  color: white;
+  font-weight: 700;
+  font-size: var(--text-sm);
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: var(--space-sm);
 }
 
 .container {
@@ -145,7 +267,7 @@ code, pre, kbd, samp {
 }
 
 .button-danger:hover {
-  background-color: #a32424;
+  background-color: color-mix(in srgb, var(--error) 80%, black);
 }
 
 /* Loading States */
@@ -161,7 +283,7 @@ code, pre, kbd, samp {
   width: 20px;
   height: 20px;
   margin-right: 0.5rem;
-  border: 2px solid #a8b4ad;
+  border: 2px solid var(--spinner-track);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -170,6 +292,61 @@ code, pre, kbd, samp {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Skeleton placeholders — one block per article card. Card grids show these
+ * while the first fetch is in flight instead of a spinner, so the page keeps
+ * its finished shape (better perceived performance than a spinner alone). */
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--skeleton-card-height, 240px);
+  background-color: var(--bg-secondary);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 25%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-media {
+  height: 170px;
+  border-radius: 0;
+}
+
+.skeleton-line {
+  height: 0.72rem;
+  margin-bottom: 0.6rem;
+}
+
+.skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+.skeleton-line-title { height: 1.1rem; }
+
+.skeleton-line-1 { width: 35%; }
+.skeleton-line-2 { width: 60%; }
+.skeleton-line-3 { width: 90%; }
+.skeleton-line-4 { width: 45%; }
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
 }
 
 /* Error/Success Alert Box */
@@ -183,15 +360,72 @@ code, pre, kbd, samp {
 }
 
 .alert-error {
-  background-color: #fdf2f2;
-  border-color: #f5c2c2;
+  background-color: var(--error-soft);
+  border-color: var(--error-border);
   color: var(--error);
 }
 
 .alert-success {
-  background-color: #f2fbf2;
-  border-color: #c2f5c2;
+  background-color: var(--success-soft);
+  border-color: var(--success-border);
   color: var(--success);
+}
+
+/* Toasts — transient confirmation messages, bottom-right. */
+.toast-root {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  max-width: min(360px, calc(100vw - 2rem));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  padding: 0.8rem 1rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  animation: toast-in 0.25s ease both;
+}
+
+.toast-success { border-left-color: var(--success); }
+.toast-error { border-left-color: var(--error); }
+
+.toast-close {
+  margin-left: auto;
+  padding: 0 0.15rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  color: var(--text-primary);
+}
+
+.toast.is-leaving {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* Form controls — shared by login, profile and admin */
@@ -247,6 +481,38 @@ code, pre, kbd, samp {
   color: var(--text-secondary);
 }
 
+/* Marks a field the editor may leave alone. Sits next to the label rather than
+   in the hint, so "optional" is legible before the field is read. */
+.field-optional {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* Form groups — shared by the profile page (previously buried in auth.css,
+   which profile.html does not load, so its labels rendered unstyled). */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.82rem;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
 /* Checkbox / switch rows */
 .check-row {
   display: flex;
@@ -276,12 +542,12 @@ code, pre, kbd, samp {
 }
 
 .badge-draft {
-  background-color: #fdf4e3;
+  background-color: var(--warning-soft);
   color: var(--warning);
 }
 
 .badge-published {
-  background-color: #eaf6ea;
+  background-color: var(--success-soft);
   color: var(--success);
 }
 

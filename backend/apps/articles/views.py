@@ -14,7 +14,7 @@ from .permissions import IsAuthorOrReadOnly
 from .serializers import (
     CategorySerializer, TagSerializer,
     ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer,
-    ReactionRequestSerializer, ReactionResultSerializer,
+    ReactionRequestSerializer, ReactionResultSerializer, ViewResultSerializer,
 )
 import logging
 
@@ -128,7 +128,9 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     # who is not staff, so the filter can only ever narrow an already-filtered set.
     filterset_class = ArticleFilterSet
     search_fields = ['title', 'excerpt']
-    ordering_fields = ['created_at', 'title']
+    # `view_count` is exposed so "most read" is a plain ordering parameter
+    # rather than something the client has to fetch everything to compute.
+    ordering_fields = ['created_at', 'title', 'view_count']
     ordering = ['-created_at']
 
     def get_serializer_class(self):
@@ -267,6 +269,38 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
             'like_count': article.like_count,
             'dislike_count': article.dislike_count,
         })
+
+    @extend_schema(
+        request=None,
+        responses={200: ViewResultSerializer},
+        summary='Record a read of this article',
+        description=(
+            'Counts one read and returns the new total. Deliberately a separate '
+            'action rather than a side effect of `GET` on the detail route: that '
+            'route also serves the admin editor, so incrementing there would '
+            'tally an editor\'s own previews as traffic. The caller sends this '
+            'once per reader session; it is not deduplicated server-side, so the '
+            'result is a counter rather than an audit log. Requests from '
+            'signed-in staff are acknowledged without counting, so writing an '
+            'article does not inflate its own number.'
+        ),
+    )
+    @action(detail=True, methods=['post'])
+    def view(self, request, slug=None, **kwargs):
+        """Count a read of this article.
+
+        Public on purpose, so anonymous readers count. It is therefore not in
+        AUTHENTICATED_ACTIONS: the mixin already hands unrecognised actions
+        `AllowAny`, and a `permission_classes` here would be ignored.
+        """
+        article = self.get_object()
+
+        # Staff are checking their own work, not reading it. Only staff, because
+        # an ordinary signed-in reader is exactly who the counter is for.
+        if request.user.is_authenticated and request.user.is_staff:
+            return Response({'view_count': article.view_count})
+
+        return Response({'view_count': article.record_view()})
 
     @action(detail=True, methods=['post'])
     def reindex(self, request, slug=None, **kwargs):

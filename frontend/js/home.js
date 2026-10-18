@@ -1,6 +1,6 @@
 import { initNavbar } from './navbar.js';
 import { getArticles, getCategories, normalizePage } from './api/articles.js';
-import { articleCardMarkup, messageStateMarkup, escapeHtml } from './renderer.js';
+import { articleCardMarkup, messageStateMarkup, escapeHtml, skeletonCardsMarkup } from './renderer.js';
 
 function renderCards(container, articles, options) {
   if (!container) return;
@@ -43,7 +43,7 @@ async function loadFeatured(container) {
 }
 
 async function loadRecent(container) {
-  container.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Loading articles…</div>';
+  container.innerHTML = skeletonCardsMarkup({ count: 6 });
   try {
     const page = normalizePage(await getArticles({ page: 1, ordering: '-created_at' }));
     const withoutFeatured = page.results.filter((article) => !featuredIds.has(String(article.id)));

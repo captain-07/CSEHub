@@ -1,6 +1,7 @@
 import { logoutUser } from './auth.js';
 import { initAuth, subscribeAuth } from './auth-state.js';
 import { escapeHtml, safeUrl } from './renderer.js';
+import { initThemeToggle } from './theme.js';
 
 /**
  * Injects the shared navigation bar into any `.site-header` element and keeps it
@@ -67,6 +68,14 @@ export function initNavbar() {
   const menu = header.querySelector('#nav-menu');
   const toggle = header.querySelector('.mobile-nav-toggle');
 
+  // Shared by the toggle, the outside-click handler and Escape: the menu is a
+  // single open/close state, so its bookkeeping lives in one place.
+  const closeMenu = () => {
+    menu.classList.remove('active');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.textContent = '☰';
+  };
+
   toggle.addEventListener('click', () => {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
     toggle.setAttribute('aria-expanded', String(!expanded));
@@ -74,17 +83,30 @@ export function initNavbar() {
     menu.classList.toggle('active');
   });
 
+  // Click outside the open menu dismisses it — expected behaviour for an
+  // overlay-style navigation.
+  document.addEventListener('click', (event) => {
+    if (!menu.classList.contains('active')) return;
+    if (event.target === toggle || toggle.contains(event.target) || menu.contains(event.target)) return;
+    closeMenu();
+  });
+
+  // Escape closes the menu and hands focus back to the control that opened it,
+  // instead of leaving the keyboard user stranded after the menu disappears.
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !menu.classList.contains('active')) return;
+    closeMenu();
+    toggle.focus();
+  });
+
   // Close the mobile menu after following a link inside it.
   menu.addEventListener('click', (event) => {
-    if (event.target.closest('a')) {
-      menu.classList.remove('active');
-      toggle.setAttribute('aria-expanded', 'false');
-      toggle.textContent = '☰';
-    }
+    if (event.target.closest('a')) closeMenu();
   });
 
   subscribeAuth((state) => renderMenu(menu, state));
   initAuth();
+  initThemeToggle();
 }
 
 function renderMenu(menu, state) {

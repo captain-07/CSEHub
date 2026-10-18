@@ -1,0 +1,37 @@
+# Build-context exclusions for the backend image. The image only consumes
+# requirements.txt, backend/ and docker/docker-entrypoint.sh; everything else is
+# shipped over the network to the daemon for nothing.
+
+# Virtualenv, VCS metadata, CI
+.venv/
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Secrets. Injected at run time — `env_file` in compose, or the platform's own
+# environment — and never baked into a layer.
+backend/.env
+**/.env
+
+# Generated at build time (collectstatic) or at run time (uploads).
+backend/staticfiles/
+backend/media/
+
+# The static client is served by nginx (or Vercel), not by this image.
+frontend/
+
+# Compose/Docker files themselves are not needed inside the build.
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+**/__pycache__/
+**/*.py[cod]
+**/*.log
+
+# Docs, review notes and the local static check scripts.
+**/*.md
+codebase*.txt
+.check-*.mjs
+node_modules/

@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Sign in to CSEHub with your Google account." />
     <title>CSEHub — Login</title>
+
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- Theme bootstrap: runs before first paint so the initial render already
+         carries the right palette (no flash of the wrong theme). js/theme.js
+         takes over from here. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('csehub-theme');
+          var dark = stored ? stored === 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        } catch (error) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -15,6 +32,7 @@
     <link rel="stylesheet" href="css/auth.css" />
   </head>
   <body>
+    <a class="skip-link" href="#app">Skip to content</a>
     <header class="site-header"></header>
 
     <main id="app">
