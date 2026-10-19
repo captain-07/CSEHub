@@ -9,7 +9,7 @@
 
 import { apiFetch, ApiError } from './api.js';
 import { initAuth, getAuthState } from './auth-state.js';
-import { escapeHtml } from './renderer.js';
+import { escapeHtml, renderAssistantMarkup } from './renderer.js';
 
 let activeArticleSlug = null;
 let activeArticleTitle = '';
@@ -46,8 +46,14 @@ function setArticleTitle(title) {
 }
 
 function setDrawerOpen(isOpen) {
-  document.querySelector('#chat-drawer')?.classList.toggle('open', isOpen);
-  document.querySelector('#chat-overlay')?.classList.toggle('open', isOpen);
+  const drawer = document.querySelector('#chat-drawer');
+  const overlay = document.querySelector('#chat-overlay');
+  drawer?.classList.toggle('open', isOpen);
+  overlay?.classList.toggle('open', isOpen);
+  // Closed means off-screen *and* inert: without this the drawer stays in the
+  // tab order and the accessibility tree, so Tab lands on an invisible Close
+  // button and the article behind it is hidden from a screen reader.
+  if (drawer) drawer.inert = !isOpen;
   if (isOpen) {
     // Move focus into the drawer so keyboard and screen-reader users are not
     // left behind on the article.
@@ -69,6 +75,8 @@ function ensureChatElementsCreated() {
   drawer.setAttribute('role', 'dialog');
   drawer.setAttribute('aria-modal', 'true');
   drawer.setAttribute('aria-labelledby', 'chat-article-title');
+  // Created closed, so it starts out of the tab order too.
+  drawer.inert = true;
   drawer.innerHTML = `
     <header class="chat-header">
       <div class="chat-header-title">
@@ -86,7 +94,7 @@ function ensureChatElementsCreated() {
                maxlength="1000" required autocomplete="off" />
         <button class="button button-primary" id="chat-send-btn" type="submit">Send</button>
       </form>
-      <p class="chat-hint">Answers are grounded in this article only.</p>
+      <p class="chat-hint">Answers come from this article first, then general knowledge.</p>
     </div>
   `;
 
@@ -142,8 +150,12 @@ function appendMessage(role, content) {
 
   const bubble = document.createElement('div');
   bubble.className = `chat-message ${role}`;
-  // Escaped text with real line breaks — no HTML is ever injected here.
-  bubble.innerHTML = `<div>${escapeHtml(content).replaceAll('\n', '<br />')}</div>`;
+  // The assistant answers in light markdown (fenced code, inline code,
+  // emphasis, lists); renderAssistantMarkup escapes first and re-admits only
+  // the tags it builds. Questions and error copy stay plain escaped text.
+  bubble.innerHTML = role === 'assistant'
+    ? `<div>${renderAssistantMarkup(content)}</div>`
+    : `<div>${escapeHtml(content).replaceAll('\n', '<br />')}</div>`;
   container.appendChild(bubble);
   scrollToBottom();
 }
@@ -183,7 +195,8 @@ async function loadConversationHistory() {
       container.innerHTML = `
         <div class="chat-message assistant">
           Ask me about <strong>${escapeHtml(activeArticleTitle)}</strong> — I can explain a concept,
-          walk through a code block, or give you another example. My answers come only from this article.
+          walk through a code block, or give you another example. I answer from this article where
+          it covers the point, and say so when I am giving a general explanation instead.
         </div>`;
       return;
     }

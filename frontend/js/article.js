@@ -5,7 +5,7 @@ import { openChatForArticle } from './chat.js';
 import { initReactions } from './reactions.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, readingTime,
-  contentToPlainText, snippetMarkup, highlightSnippets, videoMarkup, bindVideoFacades,
+  contentToPlainText, snippetMarkup, highlightSnippets, videoMarkup,
 } from './renderer.js';
 
 /** Wire up the thin reading-progress bar that tracks scroll position. */
@@ -53,7 +53,9 @@ function initTableOfContents(shell) {
         ${links.map((link) => `<li><a href="#${link.id}">${escapeHtml(link.text)}</a></li>`).join('')}
       </ul>
     </nav>`;
-  articleEl.after(aside);
+  // Inserted *before* the <article>: the rail renders on the left, so this
+  // keeps the DOM order (and therefore the tab order) matching what is seen.
+  articleEl.before(aside);
   shell.classList.add('has-toc');
 
   // Scroll-spy: highlight the last heading that has scrolled past the top of
@@ -358,13 +360,13 @@ async function initArticle() {
             ${tagsMarkup(article.tags).length ? `<div class="tag-list">${tagsMarkup(article.tags)}</div>` : ''}
           </header>
 
-          ${videoMarkup(article.video_url, { title: article.title })}
-
           <div class="article-content">${renderArticleContent(article.content)}</div>
 
           ${article.code_snippets?.length
             ? article.code_snippets.map((snippet) => snippetMarkup(snippet)).join('')
             : ''}
+
+          ${videoMarkup(article.video_url, { title: article.title })}
 
           <div class="article-reactions" id="article-reactions" data-article-key="${escapeHtml(articleKey)}"></div>
 
@@ -385,7 +387,6 @@ async function initArticle() {
 
       bindCopyButtons(shell);
       highlightSnippets(shell);
-      bindVideoFacades(shell);
       initTableOfContents(shell);
       // Not awaited: it resolves the Supabase session first, and the article
       // should not wait on that to appear.

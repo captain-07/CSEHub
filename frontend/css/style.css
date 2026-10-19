@@ -18,18 +18,28 @@
   --accent-rgb: 39, 100, 76;
   --shade-rgb: 23, 33, 31; /* neutral-tinted shadows */
 
+  /* Foregrounds that sit ON a filled semantic colour. These exist because the
+   * fills flip lightness between themes (--accent is a dark green in light mode
+   * and a light green in dark), so a hardcoded `white` or `--text-primary` label
+   * ends up near-invisible in one of the two. */
+  --on-accent: #ffffff;
+  --on-error: #ffffff;
+  --accent-bright: #4caf82; /* lighter accent, for the reading-progress gradient */
+
   --border: #dce1dc;
   --code-bg: #18201e;
+  /* The code surface stays dark in both themes, so its text colour does too. */
+  --code-text: #e0ece4;
 
   /* Status colours + their washed backgrounds */
   --error: #cc3333;
   --error-soft: #fdf2f2;
   --error-border: #f5c2c2;
   --error-rgb: 204, 51, 51;
-  --success: #228b22;
+  --success: #1e7d1e;
   --success-soft: #f2fbf2;
   --success-border: #c2f5c2;
-  --warning: #b26a00;
+  --warning: #9e5c00;
   --warning-soft: #fdf4e3;
 
   /* Reaction "dislike" — warm red, independent from --error */
@@ -47,6 +57,7 @@
   --spinner-track: #a8b4ad;
   --google-btn-bg: #ffffff;
   --google-btn-bg-hover: #f7f6f2;
+  --google-btn-text: #17211f; /* the pill stays white in both themes, so does its label */
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364716d' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --search-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364716d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
   --skeleton-base: #eceae3;
@@ -103,6 +114,10 @@
   --accent-rgb: 99, 180, 143;
   --shade-rgb: 0, 0, 0;
 
+  --on-accent: #0f1a15; /* dark label over the light-green accent */
+  --on-error: #2b1212;
+  --accent-bright: #8fd4b2;
+
   --border: #2c3833;
   --code-bg: #131a18; /* nudged darker than the light-mode snippet so it still reads as distinct */
 
@@ -128,6 +143,7 @@
   --spinner-track: #3d4a44;
   --google-btn-bg: #ffffff; /* stays white — recognised identity */
   --google-btn-bg-hover: #eef0ef;
+  --google-btn-text: #17211f;
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239aa8a2' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --search-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa8a2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
   --skeleton-base: #1d2622;
@@ -180,7 +196,7 @@ code, pre, kbd, samp {
   padding: 0.55rem 1.1rem;
   border-radius: var(--radius-md);
   background-color: var(--accent);
-  color: white;
+  color: var(--on-accent);
   font-weight: 700;
   font-size: var(--text-sm);
   transition: top 0.15s ease;
@@ -236,7 +252,7 @@ code, pre, kbd, samp {
 }
 
 .button-primary {
-  color: white;
+  color: var(--on-accent);
   background-color: var(--accent);
 }
 
@@ -262,7 +278,7 @@ code, pre, kbd, samp {
 }
 
 .button-danger {
-  color: white;
+  color: var(--on-error);
   background-color: var(--error);
 }
 
@@ -320,7 +336,7 @@ code, pre, kbd, samp {
 }
 
 .skeleton-media {
-  height: 170px;
+  height: 190px;
   border-radius: 0;
 }
 
@@ -402,6 +418,13 @@ code, pre, kbd, samp {
 .toast-success { border-left-color: var(--success); }
 .toast-error { border-left-color: var(--error); }
 
+/* The message is a flex item, so it needs an explicit min-width before it will
+ * wrap: a long unbroken string (a URL in an error) overflows the toast. */
+.toast-message {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
 .toast-close {
   margin-left: auto;
   padding: 0 0.15rem;
@@ -481,20 +504,15 @@ code, pre, kbd, samp {
   color: var(--text-secondary);
 }
 
-/* Marks a field the editor may leave alone. Sits next to the label rather than
-   in the hint, so "optional" is legible before the field is read. */
-.field-optional {
-  display: inline-block;
-  margin-left: 0.4rem;
-  padding: 0.05rem 0.45rem;
-  border-radius: var(--radius-pill);
-  background-color: var(--accent-soft);
-  color: var(--accent-strong);
-  font-size: 0.625rem;
+/* Marks a field that cannot be left blank. Sits on the label rather than in the
+   hint, so the requirement is legible before the input is read. The glyph itself
+   is hidden from assistive tech: a control states the same thing through its own
+   `required` attribute, and announcing both would say it twice. `--error` is the
+   token .check-contrast.mjs verifies as text on the page background. */
+.field-required {
+  margin-left: 0.25rem;
+  color: var(--error);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  vertical-align: middle;
 }
 
 /* Form groups — shared by the profile page (previously buried in auth.css,

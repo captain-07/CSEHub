@@ -134,7 +134,7 @@
 .filters select:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+  box-shadow: var(--focus-ring);
 }
 
 .filters .button-primary {
@@ -234,6 +234,20 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1.35rem;
+  /* Cards are content-sized rather than stretched to their tallest neighbour.
+     Seven of the ten articles carry no cover image, so a stretched card has
+     nothing to put in the extra height and shows it as a blank block between
+     the excerpt and the footer. Ragged rows are the honest shape. */
+  align-items: start;
+}
+
+/* The featured rail is the same grid but rarely holds three cards, and two
+   cards in a three-column track leave a card-sized hole at the right of the
+   home page. `auto-fit` collapses the empty track so the rail fills its row.
+   It needs no breakpoints either: the 320px minimum already forces one column
+   on a phone and two on a tablet. */
+#featured-articles {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
 }
 
 /* ── Article card ────────────────────────────────────────────── */
@@ -265,21 +279,54 @@
   box-shadow: 0 12px 36px rgba(var(--accent-rgb), 0.15);
 }
 
-/* Card media (cover image) */
+/* Card media (cover image). Every cover on this site is a diagram with labels
+   running to the very edge, so cropping to a fixed box with `object-fit: cover`
+   cut whole rows and columns off — one card showed a table sliced in half, the
+   next lost its first and last column. The image is now shown whole and centred
+   on a mat, which also gives every card the same media height. */
 .article-card-media {
-  display: block;
-  overflow: hidden;
-  border-radius: 0;
-  /* No negative margins needed — card has overflow:hidden */
+  display: grid;
+  place-items: center;
+  height: 190px;
+  padding: 0.9rem;
   margin: 0;
+  overflow: hidden;
+  background-color: var(--bg-primary);
 }
 
 .article-card-media img {
   display: block;
-  width: 100%;
-  height: 170px;
-  object-fit: cover;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   transition: transform 0.4s ease;
+}
+
+/* An untouched white-background diagram is the brightest thing on a dark page.
+   A small deliberate dim keeps it in its place without inverting it. */
+[data-theme='dark'] .article-card-media img {
+  filter: brightness(0.88);
+}
+
+/* A card whose article has no cover still gets the media strip, so every card in
+   a row starts its text at the same height and the row stays flush rather than
+   one card floating above a gap. The strip carries the article's subject as a
+   large ghosted word over a pale wash of the accent: a plain empty box reads as
+   a failed image load, a worded one reads as a cover. Decorative only — the
+   same subject is announced, at full contrast, in the meta line above. */
+.article-card-media-empty {
+  background-image: linear-gradient(135deg, var(--accent-soft), transparent 88%);
+}
+
+.article-card-media-empty-label {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  text-align: center;
+  color: var(--accent);
+  opacity: 0.34;
 }
 
 .article-card:hover .article-card-media img {
@@ -316,18 +363,66 @@
   color: var(--accent-hover);
 }
 
+/* The "Featured" flag leads the meta row rather than trailing it. Trailing it
+   with `margin-left: auto` made it wrap to a second line on its own as soon as
+   the row ran out of room, so the same flag sat at a different height on a card
+   with a cover than on one without. Leading it, it can only ever open a line. */
 .card-meta .badge {
-  margin-left: auto;
+  margin-right: 0.1rem;
 }
 
-/* Like and view tallies on a card. Kept inline with the other meta text rather
-   than made badges, so they do not compete with the "Featured" flag for
-   attention. Both use tabular figures so a changing number does not shift the
-   row. */
-.card-meta .card-likes,
-.card-meta .card-views {
+/* The separator lives on the item it introduces, not in a span of its own. A
+   standalone separator span is laid out before the item it belongs to, so when
+   the meta line wraps it is left dangling at the end of the previous line. As a
+   pseudo-element it travels with its item, and a wrapped line opens with it.
+   The tallies no longer live here: on a three-column grid the line went over and
+   wrapped to hold nothing but a lone tally, so they moved to `.card-foot`. */
+.card-meta time::before,
+.card-meta .card-reading-time::before {
+  content: '\00b7';
+  margin-right: 0.4rem;
+  color: var(--text-secondary);
+}
+
+/* Card footer: engagement on the left, the read link on the right. The row was
+   already there for the link, so the tallies cost the card no extra height. */
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: auto;
+  padding-top: 0.55rem;
+}
+
+.card-foot .text-link {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* Tabular figures so a rising count does not shift the row, and no break
+   between an icon and the number it belongs to. */
+.card-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.card-stats .card-likes::before {
+  content: '\00b7';
+  margin-right: 0.45rem;
+  color: var(--text-secondary);
+}
+
+/* Every card states its read count, so it is the one figure that earns a touch
+   more weight than the like count beside it. */
+.card-stats .card-views {
+  font-weight: 700;
 }
 
 /* Article title in card — cards always render an <h3> (renderer.js), so only
@@ -608,6 +703,11 @@
 @media (max-width: 768px) {
   .filters {
     grid-template-columns: 1fr;
+  }
+  .filters input,
+  .filters select {
+    /* 16px is the threshold below which iOS Safari zooms the page on focus. */
+    font-size: 1rem;
   }
   .search-field {
     grid-column: auto;

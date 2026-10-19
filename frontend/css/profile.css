@@ -46,15 +46,17 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
-  margin-bottom: 1.5rem;
+  /* The name row is the last thing in the form, so it carries the gap above the
+     actions; the fields inside it must not add a second margin on top. */
+  margin-bottom: 2.5rem;
 }
 
 .profile-card .form-group {
   margin-bottom: 1.5rem;
 }
 
-.profile-card .form-group:last-of-type {
-  margin-bottom: 2.5rem;
+.profile-card .form-row .form-group {
+  margin-bottom: 0;
 }
 
 .profile-actions {

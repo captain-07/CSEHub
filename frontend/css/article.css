@@ -9,7 +9,7 @@
   left: 0;
   width: 0%;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), #4caf82);
+  background: linear-gradient(90deg, var(--accent), var(--accent-bright));
   z-index: 9999;
   transition: width 0.1s linear;
   border-radius: 0 2px 2px 0;
@@ -22,32 +22,33 @@
 }
 
 /* With a table of contents the shell widens and becomes a two-column layout;
- * the TOC column is appended by js/article.js only when the article has
+ * the TOC column is inserted by js/article.js only when the article has
  * sections worth listing, so short pieces keep the single-column reading
- * measure. Placement is explicit — with the default auto-placement the
- * breadcrumb would be pushed into column 1 and the whole <article> into the
- * narrow 250px second column.
+ * measure. The rail sits on the left and the article on the right — the TOC is
+ * also inserted *before* the <article> so the reading order matches the
+ * visual order. Placement is explicit: with auto-placement the breadcrumb
+ * would land in column 1 and the <article> in the wrong column.
  */
 .article-shell.has-toc {
   width: min(1160px, calc(100% - 4rem));
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-columns: 250px minmax(0, 1fr);
   align-items: start;
   gap: var(--space-lg);
 }
 
 .article-shell.has-toc > .breadcrumb {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 1;
 }
 
 .article-shell.has-toc > article {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 2;
 }
 
 .article-shell.has-toc > .article-toc {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 2;
 }
 
@@ -117,6 +118,13 @@
 @media (max-width: 1080px) {
   .article-shell.has-toc {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The two columns collapse to one, so the explicit column 2 has to go with
+     them — left in place it would open an implicit second column. */
+  .article-shell.has-toc > .breadcrumb,
+  .article-shell.has-toc > article {
+    grid-column: 1;
   }
 
   .article-toc {
@@ -319,73 +327,9 @@
   margin-top: 1.75rem;
 }
 
-/* The facade is a <button>, so its defaults are undone before it can be styled
-   as a panel. It is a button rather than a div so the player is reachable by
-   keyboard by default. */
-.article-video-facade {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  width: 100%;
-  padding: var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.12s ease;
-}
-
-.article-video-facade:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
-
-.article-video-facade:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* The play glyph is drawn with a border triangle rather than a character, so it
-   takes the accent colour and cannot degrade into a missing-glyph box. */
-.article-video-play {
-  position: relative;
-  flex: 0 0 auto;
-  width: 3rem;
-  height: 3rem;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background-color: var(--accent-soft);
-}
-
-.article-video-play::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-40%, -50%);
-  border-style: solid;
-  border-width: 0.55rem 0 0.55rem 0.9rem;
-  border-color: transparent transparent transparent var(--accent-strong);
-}
-
-.article-video-facade-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.article-video-facade-text strong {
-  font-size: var(--text-base);
-  color: var(--text-primary);
-}
-
-/* A real frame replaces the facade on click, so the box holds its shape from the
-   first paint instead of reflowing when the player arrives. */
+/* The frame is rendered by `videoMarkup` itself, so the box holds its shape from
+   the first paint. Its source is the embed URL `videoEmbed` derived from an
+   allow-listed host — never the stored string. */
 .article-video-frame {
   display: block;
   width: 100%;
@@ -455,6 +399,9 @@
   font-size: 1.065rem;
   line-height: 1.75;
   max-width: 44rem;
+  /* A long unbroken token (URL, identifier, hash) must break rather than drag
+   * the whole page into horizontal scroll on a phone. */
+  overflow-wrap: break-word;
 }
 
 .article-content p {
@@ -586,7 +533,7 @@
   border: 1px solid #26322e;
   border-radius: 12px;
   background-color: var(--code-bg);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 6px 24px rgba(var(--shade-rgb), 0.12);
 }
 
 .snippet-bar {
@@ -641,7 +588,7 @@
   margin: 0;
   padding: 1.35rem 1.25rem;
   overflow-x: auto;
-  color: #e0ece4;
+  color: var(--code-text);
   font-family: var(--font-mono);
   font-size: 0.895rem;
   line-height: 1.7;
@@ -718,7 +665,7 @@
 
 .reaction-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 3px 10px rgba(var(--shade-rgb), 0.08);
 }
 
 /* Like hover/active — green */
@@ -756,8 +703,10 @@
 }
 
 .reaction-button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  /* Matches the global focus ring rather than suppressing it — the keyboard
+   * needs to see which reaction is about to be committed. */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .reaction-icon {

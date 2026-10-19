@@ -56,8 +56,8 @@ export function initNavbar() {
 
   header.innerHTML = `
     <div class="container">
-      <a class="brand" href="index.html" aria-label="CSEHub home">
-        <span class="brand-mark" aria-hidden="true">&lt;/&gt;</span>CSEHub
+      <a class="brand" href="index.html">
+        <img class="brand-logo" src="logo.svg" alt="CSEHub" width="1939" height="811" />
       </a>
       <button class="mobile-nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav-menu">☰</button>
       <nav aria-label="Primary navigation">

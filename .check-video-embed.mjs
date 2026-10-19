@@ -4,8 +4,8 @@
  * `Article.video_url` is editor-supplied, so the reader must never hand it to an
  * iframe. `videoEmbed` allow-lists the host, reads a video id out of the URL, and
  * rebuilds the embed source from that id; anything else degrades to a plain link.
- * This file pins that, plus the click-to-load property — the markup holds no
- * frame, and the frame created on click carries only the derived URL.
+ * This file pins that, plus the property that the rendered frame carries the
+ * derived URL rather than the stored one.
  *
  * A regression here is a security bug rather than a cosmetic one: framing the
  * stored string would let any page render inside an article.
@@ -16,7 +16,7 @@
  * Run: node .check-video-embed.mjs
  */
 
-import { videoEmbed, videoMarkup, bindVideoFacades } from './frontend/js/renderer.js';
+import { videoEmbed, videoMarkup } from './frontend/js/renderer.js';
 
 let failures = 0;
 
@@ -76,7 +76,7 @@ for (const url of [
     result?.provider === null
       && result?.href === url
       && markup.includes('href=')
-      && !markup.includes('data-video-src'),
+      && !markup.includes('<iframe'),
     `got ${JSON.stringify(result)}`,
   );
 }
@@ -90,47 +90,17 @@ for (const value of ['', '   ', null, undefined, 'javascript:alert(1)', 'data:te
   );
 }
 
-section('the facade holds no frame until a reader presses play');
+section('an embeddable URL renders the player itself');
 
-const facade = videoMarkup('https://youtu.be/dQw4w9WgXcQ', { title: 'Graphs' });
-check('the rendered markup contains no iframe', !facade.includes('<iframe'));
-check('the derived source is carried as a data attribute', facade.includes(`data-video-src="${YOUTUBE_EMBED}"`));
-check('the facade is a button, so it is keyboard reachable', facade.includes('<button') && facade.includes('data-video-play'));
-check('the pasted URL is not rendered back into the panel', !facade.includes('youtu.be/dQw4w9WgXcQ'));
-check('the panel is labelled with the title', facade.includes('data-video-title="Graphs"'));
+const player = videoMarkup('https://youtu.be/dQw4w9WgXcQ', { title: 'Graphs' });
+check('the frame is rendered directly, with no button to press', player.includes('<iframe') && !player.includes('<button'));
+check('the frame source is the derived embed URL', player.includes(`src="${YOUTUBE_EMBED}"`));
+check('the stored URL is not rendered back into the panel', !player.includes('youtu.be/dQw4w9WgXcQ'));
+check('the frame is titled for assistive tech', player.includes('title="Graphs"'));
+check('the frame does not block the article on load', player.includes('loading="lazy"'));
 
-section('the frame created on click carries the derived URL, not the stored one');
-
-// The binder is the only place that touches a frame source, so this is where
-// "never the stored string" actually has to hold.
-globalThis.document = {
-  createElement: (tag) => ({
-    tagName: tag,
-    attrs: {},
-    setAttribute(name, value) { this.attrs[name] = value; },
-  }),
-};
-
-function fakePanel() {
-  const handlers = [];
-  const replaced = [];
-  return {
-    dataset: { videoSrc: YOUTUBE_EMBED, videoTitle: 'Graphs' },
-    querySelector: () => ({ addEventListener: (_type, handler) => handlers.push(handler) }),
-    replaceChildren: (node) => replaced.push(node),
-    press: () => handlers.forEach((handler) => handler()),
-    replaced,
-  };
-}
-
-const panel = fakePanel();
-bindVideoFacades({ querySelectorAll: () => [panel] });
-check('nothing is created before the click', panel.replaced.length === 0);
-
-panel.press();
-check('one frame replaces the facade', panel.replaced.length === 1 && panel.replaced[0].tagName === 'iframe');
-check('the frame source is the derived embed URL', panel.replaced[0]?.attrs.src === YOUTUBE_EMBED);
-check('the frame is titled for assistive tech', Boolean(panel.replaced[0]?.attrs.title));
+const vimeoPlayer = videoMarkup('https://vimeo.com/123456789');
+check('Vimeo resolves to the derived player URL', vimeoPlayer.includes(`src="${VIMEO_EMBED}"`));
 
 console.log(failures === 0 ? '\nVideo embed: all checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

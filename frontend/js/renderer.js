@@ -482,13 +482,16 @@ export function videoEmbed(candidate) {
 }
 
 /**
- * The "watch this" panel for an article's optional video.
+ * The player (or the link) for an article's optional video.
  *
- * A recognised provider renders as a facade: inert markup with a play button,
- * and the iframe is only built when a reader presses it (`bindVideoFacades`), so
- * a reader who never plays pays for neither the provider's scripts nor its
- * cookies. Anything that cannot be embedded renders as an outbound link — never
- * a frame, because the frame's source would then be an unvetted URL.
+ * A recognised provider renders as a real frame whose source is the one
+ * `videoEmbed` assembled out of an allow-listed host and a validated id — never
+ * the stored string, which is the whole security property here. The frame is
+ * embedded directly rather than behind a click-to-load facade: the reader gets
+ * the player without pressing anything, and a provider's scripts and cookies
+ * therefore load with the article. Anything that cannot be embedded renders as
+ * an outbound link — never a frame, because that frame's source would be an
+ * unvetted URL.
  */
 export function videoMarkup(videoUrl, { title = '' } = {}) {
   const video = videoEmbed(videoUrl);
@@ -507,51 +510,13 @@ export function videoMarkup(videoUrl, { title = '' } = {}) {
   }
 
   return `
-    <aside class="article-video" data-video-embed data-video-src="${escapeHtml(video.src)}"
-      data-video-title="${escapeHtml(title || label)}">
-      <button class="article-video-facade" type="button" data-video-play>
-        <span class="article-video-play" aria-hidden="true"></span>
-        <span class="article-video-facade-text">
-          <strong>${escapeHtml(label)}</strong>
-          <span>The player loads from ${escapeHtml(video.provider)} when you press play.</span>
-        </span>
-      </button>
+    <aside class="article-video">
+      <iframe class="article-video-frame" src="${escapeHtml(video.src)}"
+        title="${escapeHtml(title || label)}" loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen></iframe>
     </aside>`;
-}
-
-/**
- * Turns the facades `videoMarkup` rendered into real players, on click.
- *
- * The iframe is built with `createElement` and the source assigned as a
- * property, so the embed URL is never re-parsed as markup. That URL is only ever
- * the one `videoEmbed` assembled from a validated id — a stored URL cannot reach
- * the frame directly, however it was written.
- */
-export function bindVideoFacades(root = document) {
-  root.querySelectorAll('[data-video-embed]').forEach((panel) => {
-    const button = panel.querySelector('[data-video-play]');
-    if (!button) return;
-
-    button.addEventListener('click', () => {
-      const src = panel.dataset.videoSrc;
-      if (!src) return;
-
-      const frame = document.createElement('iframe');
-      frame.className = 'article-video-frame';
-      frame.setAttribute('src', src);
-      frame.setAttribute('title', panel.dataset.videoTitle || 'Video player');
-      frame.setAttribute('loading', 'lazy');
-      frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-      frame.setAttribute(
-        'allow',
-        'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
-      );
-      frame.setAttribute('allowfullscreen', '');
-
-      // Replaces the facade, so the button cannot be pressed a second time.
-      panel.replaceChildren(frame);
-    }, { once: true });
-  });
 }
 
 /**
@@ -568,34 +533,42 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   // The list endpoint omits `content`, so the server now sends a ready-made
   // `reading_time`; the local computation stays as a fallback for detail views.
   const rt = article.reading_time || readingTime(article.content);
-  // Only surfaced once an article has earned one; a "0" on every card is noise.
+  // Likes stay gated on a positive count — a zero adds nothing there.
   const likes = Number(article.like_count) || 0;
-  // Same rule for reads: an unread article says nothing rather than "0 views".
+  // Reads are not gated: a zero is itself information ("nobody has opened this
+  // yet"), and hiding it made a freshly-migrated library look as though the
+  // counter had never shipped at all.
   const views = Number(article.view_count) || 0;
+  const categoryName = (article.category && article.category.name) || 'General';
+  // Every card gets a media strip, so no card starts its text at a different
+  // height from its neighbours. Without a cover, the strip carries the subject
+  // as a large ghosted word rather than sitting there blank.
+  const media = image
+    ? `<a class="article-card-media" href="${href}" tabindex="-1" aria-hidden="true"><img src="${escapeHtml(image)}" alt="" loading="lazy" /></a>`
+    : `<span class="article-card-media article-card-media-empty" aria-hidden="true"><span class="article-card-media-empty-label">${escapeHtml(categoryName)}</span></span>`;
 
   return `
     <article class="article-card${featured ? ' article-card-featured' : ''}">
-      ${image ? `<a class="article-card-media" href="${href}" tabindex="-1" aria-hidden="true"><img src="${escapeHtml(image)}" alt="" loading="lazy" /></a>` : ''}
+      ${media}
       <div class="article-card-body">
         <p class="card-meta">
+          ${featured ? '<span class="badge">Featured</span>' : ''}
           ${article.category
             ? `<a href="articles.html?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>`
             : '<span>General</span>'}
-          <span aria-hidden="true">&middot;</span>
           <time datetime="${escapeHtml(article.created_at || '')}">${escapeHtml(formatDate(article.created_at))}</time>
-          ${rt ? `<span aria-hidden="true">&middot;</span><span>${escapeHtml(rt)}</span>` : ''}
-          ${likes > 0
-            ? `<span aria-hidden="true">&middot;</span><span class="card-likes">&#128077; ${likes}</span>`
-            : ''}
-          ${views > 0
-            ? `<span aria-hidden="true">&middot;</span><span class="card-views">&#128065; ${escapeHtml(formatViews(views))}</span>`
-            : ''}
-          ${featured ? '<span class="badge">Featured</span>' : ''}
+          ${rt ? `<span class="card-reading-time">${escapeHtml(rt)}</span>` : ''}
         </p>
         <h3><a href="${href}">${escapeHtml(article.title)}</a></h3>
         ${authorName ? `<p class="card-byline">By ${escapeHtml(authorName)}</p>` : ''}
         ${summary ? `<p>${escapeHtml(summary)}</p>` : ''}
-        <a class="text-link" href="${href}">Read article →</a>
+        <div class="card-foot">
+          <span class="card-stats">
+            ${likes > 0 ? `<span class="card-likes">&#128077; ${likes}</span>` : ''}
+            <span class="card-views">&#128065; ${escapeHtml(formatViews(views))}</span>
+          </span>
+          <a class="text-link" href="${href}">Read article →</a>
+        </div>
       </div>
     </article>`;
 }
@@ -629,4 +602,139 @@ export function skeletonCardsMarkup({ count = 6, withImage = true } = {}) {
       </div>
     </article>`;
   return `<div class="article-grid">${card.repeat(count)}</div>`;
+}
+
+/*
+ * Assistant replies — a deliberately small markdown subset.
+ *
+ * The model answers in prose with fenced code, inline backticks and emphasis,
+ * so rendering the raw string leaves the code answers unreadable. This handles
+ * exactly the constructs the assistant is asked to produce: fenced code,
+ * inline code, bold, italic, links and lists. It keeps the module's rule —
+ * escape first, then re-admit only the tags built here — so a reply can never
+ * inject markup, and it adds no dependency.
+ */
+
+const ASSISTANT_LINK_RE = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+
+/** Escapes a line, then renders its inline code, links and emphasis. */
+function assistantInline(text) {
+  const codeSpans = [];
+  // Code spans come out first so emphasis inside them is left untouched.
+  let output = escapeHtml(text).replace(/`([^`\n]+)`/g, (_, code) => {
+    codeSpans.push(`<code>${code}</code>`);
+    return `\u0000${codeSpans.length - 1}\u0000`;
+  });
+
+  output = output.replace(ASSISTANT_LINK_RE, (whole, label, url) => {
+    const href = safeUrl(url);
+    // An unusable link stays as plain text rather than becoming a dead anchor.
+    return href
+      ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer nofollow">${label}</a>`
+      : whole;
+  });
+  output = output.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // A single `*` only opens emphasis at a word boundary and for non-space
+  // content, so "2 * 3 * 4" and bullet markers are left alone.
+  output = output.replace(/(^|[\s([{“"'])\*([^\s*][^*\n]*?)\*(?!\*)/g, '$1<em>$2</em>');
+
+  return output.replace(/\u0000(\d+)\u0000/g, (_, index) => codeSpans[Number(index)]);
+}
+
+/** Renders the non-code lines of a reply into paragraphs and lists. */
+function assistantProse(text) {
+  const blocks = [];
+  let paragraph = [];
+  let list = null;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push(`<p>${paragraph.map(assistantInline).join('<br />')}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    const tag = list.ordered ? 'ol' : 'ul';
+    blocks.push(`<${tag}>${list.items.map((item) => `<li>${assistantInline(item)}</li>`).join('')}</${tag}>`);
+    list = null;
+  };
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trimEnd();
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    if (bullet || numbered) {
+      flushParagraph();
+      const ordered = Boolean(numbered);
+      if (list && list.ordered !== ordered) flushList();
+      if (!list) list = { ordered, items: [] };
+      list.items.push((bullet || numbered)[1]);
+      continue;
+    }
+
+    flushList();
+    const heading = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line);
+    // A heading becomes a bold paragraph: a chat reply has no document
+    // outline, so real heading levels would only mislead a screen reader.
+    paragraph.push(heading ? `**${heading[1].replaceAll('*', '')}**` : line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks.join('');
+}
+
+/** Renders a fenced code block; the language and the code are both escaped. */
+function assistantCode(code, language) {
+  // A fence with nothing in it is a rendering artefact — typically an unclosed
+  // fence at the end of a reply — and an empty dark box looks broken.
+  if (code.trim() === '') return '';
+
+  const label = language ? ` class="language-${escapeHtml(language)}"` : '';
+  return `<pre><code${label}>${escapeHtml(code)}</code></pre>`;
+}
+
+/**
+ * Turns one assistant reply into safe HTML. Fenced code is preserved verbatim;
+ * everything between the fences is escaped and lightly marked up.
+ */
+export function renderAssistantMarkup(value = '') {
+  const lines = String(value ?? '').replaceAll('\r\n', '\n').split('\n');
+  const output = [];
+  let prose = [];
+
+  const flushProse = () => {
+    if (!prose.length) return;
+    output.push(assistantProse(prose.join('\n')));
+    prose = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const fence = /^\s*```(.*)$/.exec(lines[index]);
+    if (!fence) {
+      prose.push(lines[index]);
+      continue;
+    }
+
+    flushProse();
+    const language = fence[1].trim();
+    const code = [];
+    index += 1;
+    while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+      code.push(lines[index]);
+      index += 1;
+    }
+    // An unterminated fence still renders as a block, so three stray backticks
+    // never leak into the prose.
+    output.push(assistantCode(code.join('\n'), language));
+  }
+
+  flushProse();
+  return output.join('');
 }

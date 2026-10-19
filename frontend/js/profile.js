@@ -69,10 +69,10 @@ function renderProfileCard(profile) {
   const avatarSrc = safeUrl(profile.avatar_url);
   const displayName = profile.display_name || profile.username || 'CSEHub Student';
   const initials = initialsOf(displayName);
-  const badgeMarkup = `<div class="profile-avatar-large profile-avatar-initials" id="avatar-preview" aria-hidden="true">${escapeHtml(initials)}</div>`;
+  const initialsMarkup = `<div class="profile-avatar-large profile-avatar-initials" aria-hidden="true">${escapeHtml(initials)}</div>`;
   const avatarMarkup = avatarSrc
-    ? `<img class="profile-avatar-large" id="avatar-preview" src="${escapeHtml(avatarSrc)}" alt="" referrerpolicy="no-referrer" />`
-    : badgeMarkup;
+    ? `<img class="profile-avatar-large" src="${escapeHtml(avatarSrc)}" alt="" referrerpolicy="no-referrer" />`
+    : initialsMarkup;
 
   container.innerHTML = `
     <div class="profile-card">
@@ -99,12 +99,6 @@ function renderProfileCard(profile) {
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="avatar_url">Avatar URL</label>
-          <input class="input" type="url" id="avatar_url" name="avatar_url" value="${escapeHtml(profile.avatar_url || '')}" placeholder="https://example.com/avatar.jpg" />
-          <span class="field-hint">Leave blank to use your initials.</span>
-        </div>
-
         <div class="profile-actions">
           <button class="button button-primary" type="submit" id="save-btn">Save Changes</button>
         </div>
@@ -112,10 +106,6 @@ function renderProfileCard(profile) {
 
       <div class="profile-footer">
         <dl class="account-details">
-          <div>
-            <dt>Signed in as</dt>
-            <dd>${escapeHtml(profile.email)}</dd>
-          </div>
           <div>
             <dt>Publishing rights</dt>
             <dd>${profile.is_admin ? 'Editor — can publish articles' : 'Reader — read-only access'}</dd>
@@ -137,34 +127,6 @@ function renderProfileCard(profile) {
     }
   });
 
-  const avatarInput = container.querySelector("#avatar_url");
-
-  avatarInput.addEventListener("input", () => {
-    const preview = container.querySelector("#avatar-preview");
-    if (!preview) return;
-
-    const url = safeUrl(avatarInput.value.trim());
-    if (url) {
-      if (preview.tagName === 'IMG') {
-        preview.src = url;
-        return;
-      }
-      const img = document.createElement('img');
-      img.className = 'profile-avatar-large';
-      img.id = 'avatar-preview';
-      img.alt = '';
-      img.referrerPolicy = 'no-referrer';
-      img.src = url;
-      preview.replaceWith(img);
-      return;
-    }
-
-    if (preview.tagName !== 'IMG') return;
-    const template = document.createElement('template');
-    template.innerHTML = badgeMarkup;
-    preview.replaceWith(template.content.firstElementChild);
-  });
-
   const form = container.querySelector("#profile-form");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -183,8 +145,7 @@ async function saveProfile(form) {
 
   const payload = {
     username: form.elements.username.value.trim(),
-    display_name: form.elements.display_name.value.trim(),
-    avatar_url: form.elements.avatar_url.value.trim()
+    display_name: form.elements.display_name.value.trim()
   };
 
   try {

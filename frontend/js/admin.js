@@ -26,7 +26,7 @@ import {
 import { ApiError } from './api.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
-  videoMarkup, bindVideoFacades, highlightSnippets,
+  videoMarkup, highlightSnippets,
 } from './renderer.js';
 import {
   resolveEditorTools, assertDocumentIsEditable, UnsupportedBlocksError,
@@ -851,7 +851,7 @@ function articleFormMarkup(article) {
     <form class="admin-form" id="article-form" novalidate>
       <div class="form-grid">
         <div class="field">
-          <label for="f-title">Title</label>
+          <label for="f-title">Title <span class="field-required" aria-hidden="true">*</span></label>
           <input class="input" id="f-title" name="title" required value="${escapeHtml(article?.title || '')}" />
         </div>
         <div class="field">
@@ -874,9 +874,9 @@ function articleFormMarkup(article) {
       </div>
 
       <div class="field">
-        <label for="f-video-url">Video URL <span class="field-optional">optional</span></label>
+        <label for="f-video-url">Video URL</label>
         <input class="input" id="f-video-url" name="video_url" type="url" value="${escapeHtml(article?.video_url || '')}" placeholder="https://www.youtube.com/watch?v=…" />
-        <span class="field-hint">A YouTube or Vimeo link plays inline above the article; any other link is shown as a plain link. Leave blank for no video.</span>
+        <span class="field-hint">A YouTube or Vimeo link plays inline at the end of the article; any other link is shown as a plain link. Leave blank for no video.</span>
       </div>
 
       <div class="form-grid">
@@ -892,7 +892,7 @@ function articleFormMarkup(article) {
       </div>
 
       <div class="field">
-        <span class="field-label">Content</span>
+        <span class="field-label">Content <span class="field-required" aria-hidden="true">*</span><span class="sr-only"> required</span></span>
         <div id="editorjs" class="editor-holder"></div>
         <span class="field-hint" id="editor-hint">
           Blocks: headings, lists, quotes, code, images and dividers. Bold, italic and links work inside any text block.
@@ -1055,9 +1055,32 @@ async function renderArticleForm(id) {
 }
 
 
+/**
+ * Whether the editor holds anything worth saving.
+ *
+ * Text is measured with `contentToPlainText` so that this and the excerpt
+ * builder cannot drift apart over what "content" means. That helper flattens a
+ * document to its text, though, and an image carries none — so a picture on its
+ * own is counted here instead of reading as an empty body. Its URL sits under
+ * `file.url` (see `renderImageBlock`), which is the other reason a check for
+ * `data.url` alone would not have found it.
+ */
+function documentHasBody(content) {
+  if (contentToPlainText(content, Number.MAX_SAFE_INTEGER)) return true;
+  return (content?.blocks || []).some(
+    (block) => block?.type === 'image' && Boolean(block.data?.file?.url || block.data?.url)
+  );
+}
+
 async function collectPayload() {
   const form = document.querySelector('#article-form');
   if (!editor) throw new Error('The editor is not ready.');
+
+  // `save` is attached by Editor.js's own `exportAPI` when its bootstrap
+  // resolves, so a save pressed inside that window used to fail with
+  // "editor.save is not a function" — an error that says nothing about what to
+  // do, on a button the author has no reason to think is early.
+  await editor.isReady;
 
   const content = await editor.save();
 
@@ -1096,13 +1119,26 @@ async function saveArticle(event, article) {
   saveBtn.disabled = true;
   saveBtn.textContent = 'Saving…';
 
+  // The form is `novalidate` and a route change can replace the button mid-flight,
+  // so both restore paths go through here rather than repeating the lines.
+  const restoreSaveButton = () => {
+    if (!document.body.contains(saveBtn)) return;
+    saveBtn.disabled = false;
+    saveBtn.textContent = article ? 'Save changes' : 'Create article';
+  };
+
   try {
     const payload = await collectPayload();
 
-    if (!payload.title) {
-      statusMessage('A title is required before saving.', 'error');
-      saveBtn.disabled = false;
-      saveBtn.textContent = article ? 'Save changes' : 'Create article';
+    // The two fields marked with a `*` are enforced here, not by a `required`
+    // attribute: the form is `novalidate`, so the browser would never speak.
+    const missing = [];
+    if (!payload.title) missing.push('a title');
+    if (!documentHasBody(payload.content)) missing.push('a body');
+
+    if (missing.length) {
+      statusMessage(`An article needs ${missing.join(' and ')} before it can be saved.`, 'error');
+      restoreSaveButton();
       return;
     }
 
@@ -1122,10 +1158,7 @@ async function saveArticle(event, article) {
     await renderRoute();
   } catch (error) {
     statusMessage(`Unable to save: ${friendlyError(error)}`, 'error');
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = article ? 'Save changes' : 'Create article';
-    }
+    restoreSaveButton();
   }
 }
 
@@ -1170,8 +1203,8 @@ function openPreview() {
           </header>
           <div class="modal-body">
             ${payload.excerpt ? `<p class="article-excerpt">${escapeHtml(payload.excerpt)}</p>` : ''}
-            ${videoMarkup(payload.video_url, { title: payload.title })}
             <div class="article-content article-preview">${renderArticleContent(payload.content)}</div>
+            ${videoMarkup(payload.video_url, { title: payload.title })}
           </div>
         </div>`;
 
@@ -1181,8 +1214,6 @@ function openPreview() {
       // The preview is rebuilt from the editor's blocks, so the snippets are
       // fresh DOM and must be highlighted after insertion.
       highlightSnippets(modal);
-      // Same for the video facade: it is inert markup until it is wired up.
-      bindVideoFacades(modal);
 
       const close = () => {
         modal.remove();

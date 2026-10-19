@@ -38,12 +38,12 @@
   font-weight: 700;
   font-size: 0.88rem;
   cursor: pointer;
-  color: var(--text-primary);
+  color: var(--google-btn-text);
   transition: all 0.2s ease;
 }
 
 .google-btn:hover {
-  border-color: var(--text-primary);
+  border-color: var(--google-btn-text);
   background-color: var(--google-btn-bg-hover);
 }
 

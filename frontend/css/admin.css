@@ -216,6 +216,94 @@
   max-width: none;
 }
 
+/* --- Editor.js chrome in dark mode --------------------------------------
+   Editor.js ships only a light theme. It exposes its palette as custom
+   properties (`:root`, `.ce-popover`, `.ce-inline-toolbar`), so dark mode
+   re-points those instead of restyling every injected element; the handful of
+   colours its stylesheet hardcodes get an explicit override below. Without
+   this, the block toolbar, the `+`/settings popovers and the block picker stay
+   white-on-white in the dark editor. */
+:root[data-theme='dark'] {
+  --bg-light: #1e2823;   /* toolbar + inline-tool hover fills */
+  --grayText: #9aa8a2;   /* Editor.js placeholder text */
+  --color-line-gray: #2c3833;
+  --color-gray-border: #2c3833;
+}
+
+:root[data-theme='dark'] .ce-popover {
+  --color-background: var(--bg-secondary);
+  --color-border: var(--border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-shadow: rgba(var(--shade-rgb), 0.5);
+  --color-border-icon: var(--border);
+  --color-border-icon-disabled: var(--border);
+  --color-background-item-hover: var(--accent-soft);
+  --color-background-item-focus: var(--accent-soft);
+  --color-shadow-item-focus: rgba(var(--accent-rgb), 0.15);
+}
+
+:root[data-theme='dark'] .ce-inline-toolbar {
+  --color-text-primary: var(--text-primary);
+}
+
+:root[data-theme='dark'] .ce-toolbar__plus,
+:root[data-theme='dark'] .ce-toolbar__settings-btn {
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  border-color: var(--border);
+}
+
+:root[data-theme='dark'] .ce-toolbar__plus:hover,
+:root[data-theme='dark'] .ce-toolbar__plus--active,
+:root[data-theme='dark'] .ce-toolbar__settings-btn:hover,
+:root[data-theme='dark'] .ce-toolbar__settings-btn--active,
+:root[data-theme='dark'] .ce-inline-toolbar__dropdown:hover,
+:root[data-theme='dark'] .ce-inline-tool:hover,
+:root[data-theme='dark'] .cdx-settings-button:hover {
+  background-color: var(--accent-soft);
+}
+
+:root[data-theme='dark'] .ce-inline-tool-input,
+:root[data-theme='dark'] .cdx-search-field,
+:root[data-theme='dark'] .image-tool--loading .image-tool__image {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .cdx-search-field {
+  border-color: var(--border);
+}
+
+:root[data-theme='dark'] .ce-block--selected .ce-block__content {
+  background-color: var(--accent-soft);
+}
+
+:root[data-theme='dark'] .cdx-button {
+  background-color: var(--bg-secondary);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .ce-stub {
+  background-color: var(--bg-secondary);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+/* Placeholders are hardcoded grey in three separate tools. */
+:root[data-theme='dark'] .ce-paragraph[data-placeholder]:empty::before,
+:root[data-theme='dark'] .cdx-quote [contenteditable='true'][data-placeholder]::before,
+:root[data-theme='dark'] .image-tool__caption[contenteditable='true'][data-placeholder]::before {
+  color: var(--text-secondary);
+}
+
+/* The image tool paints a light grey behind transparent images. */
+:root[data-theme='dark'] .image-tool {
+  --bg-color: #101615;
+  --border-color: var(--border);
+}
+
 /* --- Custom block tools (js/editor-tools) ---------------------------------
    The code block deliberately mirrors the dark reading palette in article.css
    so what an author types looks like the published snippet. */
@@ -276,8 +364,11 @@
   tab-size: 2;
 }
 
-.cdx-code__textarea:focus {
-  outline: none;
+.cdx-code__textarea:focus-visible {
+  /* The container is the visible frame, so the ring is drawn just inside it
+   * (the holder clips its overflow) rather than around the textarea. */
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .cdx-link {
@@ -381,7 +472,7 @@
   padding: var(--space-md);
   /* Locked to stop the page behind the modal from scrolling. */
   overflow-y: auto;
-  background: rgba(23, 33, 31, 0.55);
+  background: rgba(var(--shade-rgb), 0.55);
 }
 
 .modal-narrow {
@@ -509,5 +600,13 @@
 
   #admin-status {
     position: static;
+  }
+
+  /* 16px is the threshold below which iOS Safari zooms the page on focus, so
+     the editor's own controls grow to it on small screens only. */
+  .cdx-code__textarea,
+  .cdx-code__select,
+  .cdx-link__input {
+    font-size: 1rem;
   }
 }

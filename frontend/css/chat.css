@@ -7,15 +7,22 @@
   height: 100vh;
   background-color: var(--bg-secondary);
   border-left: 1px solid var(--border);
-  box-shadow: -5px 0 30px rgba(0, 0, 0, 0.1);
+  box-shadow: -5px 0 30px rgba(var(--shade-rgb), 0.18);
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  transition: right 0.3s ease;
+  /* While closed the drawer is off-screen but still in the DOM. `visibility`
+   * removes it from sequential focus and the accessibility tree too — an
+   * off-screen element stays tabbable otherwise. js/chat.js also sets `inert`. */
+  visibility: hidden;
+  transition: right 0.3s ease, visibility 0s linear 0.3s;
 }
 
 .chat-drawer.open {
   right: 0;
+  visibility: visible;
+  /* No visibility delay on the way in, so the drawer appears immediately. */
+  transition: right 0.3s ease;
 }
 
 .chat-overlay {
@@ -24,7 +31,7 @@
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(var(--shade-rgb), 0.55);
   backdrop-filter: blur(2px);
   z-index: 999;
   display: none;
@@ -93,7 +100,7 @@
 .chat-message.user {
   align-self: flex-end;
   background-color: var(--accent);
-  color: white;
+  color: var(--on-accent);
   border-bottom-right-radius: 2px;
 }
 
@@ -122,6 +129,64 @@
   margin-top: var(--space-3xs);
 }
 
+/* Assistant replies are markdown. js/renderer.js maps fenced code, inline code,
+ * emphasis and lists onto these element types — no new class names, so the
+ * reply stays inside the same escaped allow-list as the rest of the site. */
+.chat-message p {
+  margin: 0 0 0.6rem;
+}
+
+.chat-message p:last-child,
+.chat-message ul:last-child,
+.chat-message ol:last-child,
+.chat-message pre:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message ul,
+.chat-message ol {
+  margin: 0 0 0.6rem;
+  padding-left: 1.25rem;
+}
+
+.chat-message li {
+  margin-bottom: 0.25rem;
+}
+
+.chat-message li:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message a {
+  color: var(--accent);
+  text-decoration: underline;
+  overflow-wrap: break-word;
+}
+
+/* Fenced blocks get the same always-dark code surface as published snippets. */
+.chat-message pre {
+  margin: 0.6rem 0;
+  padding: 0.85rem 1rem;
+  max-width: 100%;
+  overflow-x: auto;
+  background-color: var(--code-bg);
+  color: var(--code-text);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Inline code only — a <code> inside <pre> inherits the block styling above. */
+.chat-message :not(pre) > code {
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--inline-code-bg);
+  color: var(--inline-code-text);
+  font-size: 0.85em;
+  overflow-wrap: break-word;
+}
+
 /* Chat Input Bar */
 .chat-input-area {
   padding: var(--space-sm) var(--space-md);
@@ -148,11 +213,13 @@
   border-radius: 7px;
   font-size: 0.88rem;
   background-color: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .chat-input:focus {
-  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline: none;
   border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 /* Chat Loader styling */
@@ -194,5 +261,7 @@
   .chat-input {
     /* Sits on its own row so the Send button is never squeezed off-screen. */
     flex: 1 0 100%;
+    /* 16px is the threshold below which iOS Safari zooms the page on focus. */
+    font-size: 1rem;
   }
 }
