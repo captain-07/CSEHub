@@ -7,7 +7,7 @@
  * 503/502 when the AI provider is unreachable and never fabricates a reply.
  */
 
-import { apiFetch, ApiError } from './api.js';
+import { apiFetch, ApiError, friendlyError } from './api.js';
 import { initAuth, getAuthState } from './auth-state.js';
 import { escapeHtml, renderAssistantMarkup } from './renderer.js';
 
@@ -50,6 +50,9 @@ function setDrawerOpen(isOpen) {
   const overlay = document.querySelector('#chat-overlay');
   drawer?.classList.toggle('open', isOpen);
   overlay?.classList.toggle('open', isOpen);
+  // Freeze the page behind the overlay, so a touch scroll moves the
+  // conversation rather than the article under it.
+  document.body.classList.toggle('chat-open', isOpen);
   // Closed means off-screen *and* inert: without this the drawer stays in the
   // tab order and the accessibility tree, so Tab lands on an invisible Close
   // button and the article behind it is hidden from a screen reader.
@@ -204,24 +207,20 @@ async function loadConversationHistory() {
     history.messages.forEach((message) => appendMessage(message.role, message.content));
   } catch (error) {
     console.error('Failed to load chat history:', error);
-    const message = error instanceof ApiError
-      ? error.message
-      : 'The conversation history could not be loaded.';
     container.innerHTML = '';
-    appendMessage('error', `Could not load the conversation: ${message}`);
+    appendMessage('error', `Could not load the conversation: ${friendlyError(error)}`);
   }
 }
 
 /** Maps a backend failure onto wording that tells the user what to do next. */
 function chatErrorMessage(error) {
-  if (!(error instanceof ApiError)) return 'Something went wrong. Please try again.';
+  if (!(error instanceof ApiError)) return friendlyError(error);
   if (error.status === 401) return 'Your session has expired. Sign in again to keep asking questions.';
   if (error.status === 403) return 'You do not have access to the assistant on this article.';
   if (error.status === 404) return 'This article is no longer available.';
   if (error.status === 503) return 'The assistant is not configured or is temporarily unavailable. Please try again shortly.';
   if (error.status === 502) return 'The assistant hit an unexpected error. Please try again.';
-  if (error.status === 0) return 'Network error — check your connection and try again.';
-  return error.message;
+  return friendlyError(error);
 }
 
 async function handleSendMessage() {

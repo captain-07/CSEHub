@@ -377,6 +377,9 @@
 }
 
 .tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: 0.22rem 0.6rem;
   color: var(--accent-strong);
   background-color: var(--accent-soft);

@@ -573,14 +573,29 @@ export function articleCardMarkup(article, { featured = false } = {}) {
     </article>`;
 }
 
-/** Consistent empty / error block for any API-driven region. */
-export function messageStateMarkup({ title, message, actionHref, actionLabel, icon = '\uD83D\uDD0D' }) {
+/**
+ * Consistent empty / error block for any API-driven region.
+ *
+ * `retry` renders a button instead of a link, for the case where the block is
+ * reporting a failed request: sending the reader to another page would not
+ * bring the missing articles back, so the caller binds `[data-retry]` to the
+ * loader it already has.
+ */
+export function messageStateMarkup({
+  title,
+  message,
+  actionHref,
+  actionLabel,
+  icon = '\uD83D\uDD0D',
+  retry = false,
+}) {
   return `
     <div class="empty-state">
       <span class="empty-state-icon" aria-hidden="true">${icon}</span>
       <h3>${escapeHtml(title)}</h3>
       ${message ? `<p>${escapeHtml(message)}</p>` : ''}
       ${actionHref ? `<a class="button button-secondary" href="${escapeHtml(actionHref)}">${escapeHtml(actionLabel || 'Continue')}</a>` : ''}
+      ${retry ? '<button class="button button-secondary" type="button" data-retry>Try again</button>' : ''}
     </div>`;
 }
 

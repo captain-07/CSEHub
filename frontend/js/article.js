@@ -1,5 +1,5 @@
 import { getArticle, getArticles, recordArticleView } from './api/articles.js';
-import { ApiError } from './api.js';
+import { ApiError, friendlyError } from './api.js';
 import { initNavbar } from './navbar.js';
 import { openChatForArticle } from './chat.js';
 import { initReactions } from './reactions.js';
@@ -401,11 +401,20 @@ async function initArticle() {
   } catch (error) {
     console.error('Failed to fetch article details:', error);
     if (!shell) return;
-    const message = error instanceof ApiError ? error.message : "We couldn't retrieve the article content.";
-    const notFound = error instanceof ApiError && error.status === 404;
-    shell.innerHTML = notFound
-      ? emptyState('Article Not Found', 'This article may have been unpublished or removed.')
-      : emptyState('Failed to load article', message);
+    if (error instanceof ApiError && error.status === 404) {
+      shell.innerHTML = emptyState('Article Not Found', 'This article may have been unpublished or removed.');
+      return;
+    }
+    // A failed read is usually a dropped connection, so offer the retry in
+    // place rather than sending the reader back to the library to start over.
+    shell.innerHTML = `
+      <div class="empty-state" role="alert">
+        <span class="empty-state-icon" aria-hidden="true">\uD83D\uDCE1</span>
+        <h2>Failed to load article</h2>
+        <p>${escapeHtml(friendlyError(error))}</p>
+        <button class="button button-secondary" type="button" data-retry>Try again</button>
+      </div>`;
+    shell.querySelector('[data-retry]')?.addEventListener('click', () => initArticle());
   }
 }
 

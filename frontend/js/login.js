@@ -7,7 +7,11 @@ const googleBtn = document.querySelector('#google-btn');
 const alertBox = document.querySelector('#alert-box');
 
 function showError(message) {
-  alertBox.innerHTML = `<div class="alert alert-error" role="alert">${message}</div>`;
+  alertBox.innerHTML = `<div class="alert alert-error" role="alert">${escapeHtml(message)}</div>`;
+}
+
+function showErrorHtml(html) {
+  alertBox.innerHTML = `<div class="alert alert-error" role="alert">${html}</div>`;
 }
 
 function showInfo(message) {
@@ -64,7 +68,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       await loginWithGoogle({ redirectTo: params.get('redirect') });
     } catch (error) {
       console.error('Google sign-in failed', error);
-      showError(`<strong>Google sign-in failed.</strong> ${escapeHtml(error.message || 'Please try again.')}`);
+      showErrorHtml(`<strong>Google sign-in failed.</strong> ${escapeHtml(error.message || 'Please try again.')}`);
       googleBtn.disabled = false;
       googleBtn.innerHTML = originalMarkup;
     }

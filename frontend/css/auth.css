@@ -25,6 +25,22 @@
   font-size: 0.9rem;
 }
 
+/* The wrapper sits directly in <main> rather than a .container, so on a phone
+ * it had no side gutter and its 5rem top margin pushed the card down the
+ * screen. */
+@media (max-width: 480px) {
+  .auth-wrapper {
+    width: calc(100% - 2rem);
+    margin: 2rem auto;
+    padding: 1.75rem 1.25rem;
+    border-radius: 10px;
+  }
+
+  .auth-header h1 {
+    font-size: 1.55rem;
+  }
+}
+
 .google-btn {
   width: 100%;
   height: 44px;

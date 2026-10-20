@@ -23,7 +23,7 @@ import {
   createCategory, deleteCategory, createTag, deleteTag,
   uploadImage, normalizePage,
 } from './api/articles.js';
-import { ApiError } from './api.js';
+import { friendlyError } from './api.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
   videoMarkup, highlightSnippets,
@@ -135,23 +135,6 @@ function statusMessage(text, kind = 'info', items = []) {
   el.textContent = text;
 }
 
-
-function friendlyError(error) {
-  if (error instanceof ApiError) {
-    // Prefer the API's own wording; it distinguishes "no credentials were sent"
-    // from "the token was rejected", which are very different problems.
-    if (error.status === 401) return error.message || 'Your session has expired. Sign in again to continue.';
-    if (error.status === 403) return 'You are not authorised to perform that action.';
-    if (error.status === 0) return error.message || 'Cannot reach the CSEHub API. Check your connection.';
-    const details = error.details;
-    if (details && typeof details === 'object') {
-      const first = Object.entries(details)[0];
-      if (first) return `${Array.isArray(first[1]) ? first[1][0] : first[1]}`;
-    }
-    return error.message;
-  }
-  return error?.message || 'Something went wrong.';
-}
 
 function statCard(label, value) {
   return `<div class="admin-stat"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
@@ -406,21 +389,26 @@ async function fetchAllArticles() {
 }
 
 function articleRow(article) {
+  const slug = article.slug || '';
+  const views = Number(article.view_count) || 0;
   return `
     <tr>
       <td>
         <a class="admin-article-link" href="#/articles/${article.id}/edit">${escapeHtml(article.title)}</a>
-        <span class="admin-article-slug">/${escapeHtml(article.slug)}</span>
+        <div class="slug-row">
+          <span class="admin-article-slug">/${escapeHtml(slug)}</span>
+          ${slug ? `<button type="button" class="copy-slug-btn" data-copy-slug="${escapeHtml(slug)}" title="Copy public link">Copy</button>` : ''}
+        </div>
       </td>
       <td>
         <span class="status ${article.is_published ? 'status-published' : 'status-draft'}">
           ${article.is_published ? 'Published' : 'Draft'}
         </span>
-        ${article.is_featured ? '<span class="badge">Featured</span>' : ''}
+        ${article.is_featured ? '<span class="badge badge-featured">Featured</span>' : ''}
       </td>
-      <td>${escapeHtml(article.category?.name || 'General')}</td>
-      <td class="admin-views">${escapeHtml(formatViews(article.view_count))}</td>
-      <td>${escapeHtml(formatDate(article.updated_at))}</td>
+      <td><span class="admin-category-pill">${escapeHtml(article.category?.name || 'General')}</span></td>
+      <td class="admin-views">${escapeHtml(formatViews(views))}</td>
+      <td><time class="admin-date">${escapeHtml(formatDate(article.updated_at))}</time></td>
       <td class="admin-actions">
         <a class="button button-secondary" href="#/articles/${article.id}/edit">Edit</a>
         <button class="button button-secondary" type="button" data-toggle="${article.id}" data-published="${article.is_published ? '1' : '0'}">
@@ -434,11 +422,53 @@ function articleRow(article) {
 /** Wires the shared edit/publish/delete controls in any table. */
 function bindArticleRowActions(root) {
   root.querySelectorAll('[data-toggle]').forEach((el) =>
-    el.addEventListener('click', () => togglePublish(el.dataset.toggle, el.dataset.published === '1'))
+    el.addEventListener('click', () =>
+      runRowAction(el, () => togglePublish(el.dataset.toggle, el.dataset.published === '1'))
+    )
   );
   root.querySelectorAll('[data-delete]').forEach((el) =>
-    el.addEventListener('click', () => removeArticle(el.dataset.delete, el.dataset.title))
+    el.addEventListener('click', () => runRowAction(el, () => removeArticle(el.dataset.delete, el.dataset.title)))
   );
+  root.querySelectorAll('[data-copy-slug]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const slug = btn.dataset.copySlug;
+      const url = `${window.location.origin}/article.html?slug=${encodeURIComponent(slug)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        btn.textContent = 'Copied!';
+        btn.classList.add('is-copied');
+      } catch {
+        btn.textContent = 'Failed';
+      }
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('is-copied');
+      }, 2000);
+    });
+  });
+}
+
+/**
+ * Runs a row action with its button disabled until the action settles.
+ *
+ * These confirm, hit the API and re-render the route, so a second click in that
+ * window opened a second dialog and could publish twice. The label is left
+ * alone: the confirm dialog is part of this window, and "Working…" behind a
+ * question reads as though it had already been answered.
+ */
+async function runRowAction(button, action) {
+  if (button.disabled) return;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  try {
+    await action();
+  } finally {
+    // On success the route has re-rendered and this button is detached.
+    if (button.isConnected) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
 }
 
 function dashboardMarkup({ articles, total }) {
@@ -457,6 +487,12 @@ function dashboardMarkup({ articles, total }) {
       </div>
       <a class="button button-primary" href="#/articles/new">New article</a>
     </section>
+
+    <div class="admin-quick-actions">
+      <a class="button button-primary" href="#/articles/new">+ Write new article</a>
+      <a class="button button-secondary" href="#/taxonomy">Manage categories &amp; tags</a>
+      <a class="button button-secondary" href="articles.html" target="_blank" rel="noopener">View public library ↗</a>
+    </div>
 
     <section class="admin-stats">
       ${statCard('Total articles', total)}
@@ -727,12 +763,17 @@ async function renderTaxonomy() {
       document.querySelector(formId)?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = event.target;
+        const submit = form.querySelector('button[type="submit"]');
         const input = form.elements.name;
         const name = input.value.trim();
-        if (!name) return;
+        if (!name || submit?.disabled) return;
         // `extraFields` may return null to abort (e.g. a missing category).
         const extra = extraFields ? await extraFields(form) : {};
         if (extra === null) return;
+        if (submit) {
+          submit.disabled = true;
+          submit.setAttribute('aria-busy', 'true');
+        }
         try {
           await create({ name, slug: slugify(name), ...extra });
           input.value = '';
@@ -740,6 +781,12 @@ async function renderTaxonomy() {
           await renderRoute();
         } catch (error) {
           await notify(`Could not create the ${label.toLowerCase()}`, friendlyError(error), 'error');
+        } finally {
+          // Success re-rendered the page, which detached this button.
+          if (submit?.isConnected) {
+            submit.disabled = false;
+            submit.removeAttribute('aria-busy');
+          }
         }
       });
     };
@@ -757,10 +804,14 @@ async function renderTaxonomy() {
     });
 
     app.querySelectorAll('[data-delete-category]').forEach((el) =>
-      el.addEventListener('click', () => removeTaxonomy('category', el.dataset.deleteCategory, el.dataset.name))
+      el.addEventListener('click', () =>
+        runRowAction(el, () => removeTaxonomy('category', el.dataset.deleteCategory, el.dataset.name))
+      )
     );
     app.querySelectorAll('[data-delete-tag]').forEach((el) =>
-      el.addEventListener('click', () => removeTaxonomy('tag', el.dataset.deleteTag, el.dataset.name))
+      el.addEventListener('click', () =>
+        runRowAction(el, () => removeTaxonomy('tag', el.dataset.deleteTag, el.dataset.name))
+      )
     );
   } catch (error) {
     if (!routeIsCurrent(route)) return;
@@ -840,76 +891,127 @@ function articleFormMarkup(article) {
 
   return `
     ${adminNav(article ? 'Articles' : 'New article')}
-    <section class="admin-heading">
-      <div>
-        <p class="eyebrow">${article ? 'Editing' : 'New'}</p>
-        <h1>${article ? escapeHtml(article.title) : 'Create article'}</h1>
-      </div>
-      <a class="button button-secondary" href="#/articles">← All articles</a>
-    </section>
-
-    <form class="admin-form" id="article-form" novalidate>
-      <div class="form-grid">
-        <div class="field">
-          <label for="f-title">Title <span class="field-required" aria-hidden="true">*</span></label>
-          <input class="input" id="f-title" name="title" required value="${escapeHtml(article?.title || '')}" />
+    <div class="admin-editor-wrap">
+      <header class="admin-editor-topbar">
+        <div class="admin-editor-topbar-left">
+          <a class="button button-secondary button-sm" href="#/articles">← All articles</a>
+          <span class="admin-editor-status-pill ${article?.is_published ? 'is-published' : 'is-draft'}">
+            ${article?.is_published ? 'Published' : 'Draft'}
+          </span>
         </div>
-        <div class="field">
-          <label for="f-slug">Slug</label>
-          <input class="input" id="f-slug" name="slug" value="${escapeHtml(article?.slug || '')}" placeholder="generated from title" />
-          <span class="field-hint">Leave blank to generate it from the title.</span>
+        <div class="admin-editor-topbar-center">
+          <div class="editor-metric-badge" id="editor-metrics">
+            <span id="metric-word-count">0 words</span> · <span id="metric-read-time">1 min read</span>
+          </div>
+          <div class="editor-save-indicator" id="editor-save-indicator">
+            <span class="save-status-dot"></span>
+            <span id="save-status-text">Draft ready</span>
+          </div>
         </div>
-      </div>
-
-      <div class="field">
-        <label for="f-excerpt">Excerpt</label>
-        <textarea class="textarea" id="f-excerpt" name="excerpt" placeholder="One or two sentences shown on cards and search results.">${escapeHtml(excerpt)}</textarea>
-        <span class="field-hint">Generated from the article body when left blank.</span>
-      </div>
-
-      <div class="field">
-        <label for="f-featured-image">Featured image URL</label>
-        <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://…" />
-        <span class="field-hint">Link to an externally hosted image. Inline images are uploaded from inside the editor.</span>
-      </div>
-
-      <div class="field">
-        <label for="f-video-url">Video URL</label>
-        <input class="input" id="f-video-url" name="video_url" type="url" value="${escapeHtml(article?.video_url || '')}" placeholder="https://www.youtube.com/watch?v=…" />
-        <span class="field-hint">A YouTube or Vimeo link plays inline at the end of the article; any other link is shown as a plain link. Leave blank for no video.</span>
-      </div>
-
-      <div class="form-grid">
-        <div class="field">
-          <label for="f-category">Category</label>
-          <select class="select" id="f-category" name="category">${categoryOptions}</select>
+        <div class="admin-editor-topbar-right">
+          <button class="button button-secondary button-sm" type="button" id="preview-btn">Preview</button>
+          ${article?.is_published ? '<button class="button button-secondary button-sm" type="button" id="reindex-btn">Update AI index</button>' : ''}
+          <button class="button button-primary button-sm" type="submit" id="save-btn" form="article-form">${article ? 'Save changes' : 'Create article'}</button>
+          <button class="button button-secondary button-sm" type="button" id="toggle-sidebar-btn" aria-label="Toggle settings">Settings ⚙️</button>
         </div>
-        <div class="field">
-          <label for="f-tags">Tags</label>
-          <select class="select" id="f-tags" name="tags" multiple>${tagOptions}</select>
-          <span class="field-hint">Hold Ctrl/Cmd to select several.</span>
+      </header>
+
+      <div class="draft-recovery-banner" id="draft-banner" hidden>
+        <span>You have an unsaved local draft from <strong id="draft-saved-at"></strong>.</span>
+        <div class="draft-actions">
+          <button type="button" class="button button-sm button-primary" id="btn-restore-draft">Restore draft</button>
+          <button type="button" class="button button-sm button-secondary" id="btn-discard-draft">Discard</button>
         </div>
       </div>
 
-      <div class="field">
-        <span class="field-label">Content <span class="field-required" aria-hidden="true">*</span><span class="sr-only"> required</span></span>
-        <div id="editorjs" class="editor-holder"></div>
-        <span class="field-hint" id="editor-hint">
-          Blocks: headings, lists, quotes, code, images and dividers. Bold, italic and links work inside any text block.
-        </span>
-      </div>
+      <form class="admin-form" id="article-form" novalidate>
+        <div class="admin-editor-workspace">
+          <div class="admin-editor-main">
+            <div class="title-field-wrap">
+              <label class="sr-only" for="f-title">Article Title</label>
+              <input class="input admin-editor-title-input" id="f-title" name="title" required value="${escapeHtml(article?.title || '')}" placeholder="Article Title…" autocomplete="off" />
+            </div>
 
-      <div class="check-row-group">
-        <label class="check-row"><input type="checkbox" name="is_published" ${article?.is_published ? 'checked' : ''} /> <span>Published — visible to everyone</span></label>
-        <label class="check-row"><input type="checkbox" name="is_featured" ${article?.is_featured ? 'checked' : ''} /> <span>Featured — highlighted on the home page</span></label>
-      </div>
+            <div class="field">
+              <span class="sr-only">Article Content</span>
+              <div id="editorjs" class="editor-holder"></div>
+            </div>
 
-      <div class="admin-toolbar">
-        <button class="button button-secondary" type="button" id="preview-btn">Preview</button>
-        ${article?.is_published ? '<button class="button button-secondary" type="button" id="reindex-btn">Update AI index</button>' : ''}
-        <button class="button button-primary" type="submit" id="save-btn">${article ? 'Save changes' : 'Create article'}</button>
-      </div>
-    </form>`;
+            <div class="editor-shortcuts-hint">
+              <span><strong>Tab</strong> indent code</span> · <span><strong>Shift+Enter</strong> soft break</span> · <span><strong>Esc</strong> blur code block</span>
+            </div>
+          </div>
+
+          <aside class="admin-editor-sidebar">
+            <div class="inspector-card">
+              <h3 class="inspector-title">Publication &amp; URL</h3>
+              <div class="field">
+                <label for="f-slug">URL Slug</label>
+                <div class="slug-input-group">
+                  <input class="input" id="f-slug" name="slug" value="${escapeHtml(article?.slug || '')}" placeholder="generated-from-title" />
+                  <button class="button button-secondary button-sm slug-btn" type="button" id="btn-auto-slug" title="Auto-generate slug from title">Auto</button>
+                </div>
+                <span class="field-hint">Public route: /article.html?slug=...</span>
+              </div>
+
+              <div class="check-row-group">
+                <label class="check-row">
+                  <input type="checkbox" name="is_published" ${article?.is_published ? 'checked' : ''} />
+                  <span>Published — visible to everyone</span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" name="is_featured" ${article?.is_featured ? 'checked' : ''} />
+                  <span>Featured — home page rail</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="inspector-card">
+              <h3 class="inspector-title">Taxonomy</h3>
+              <div class="field">
+                <label for="f-category">Category</label>
+                <select class="select" id="f-category" name="category">${categoryOptions}</select>
+              </div>
+
+              <div class="field">
+                <label for="f-tags">Tags</label>
+                <select class="select" id="f-tags" name="tags" multiple size="4">${tagOptions}</select>
+                <span class="field-hint">Hold Ctrl/Cmd to select several.</span>
+                <div class="tags-chips-preview" id="tags-chips-preview"></div>
+              </div>
+            </div>
+
+            <div class="inspector-card">
+              <div class="inspector-header-row">
+                <h3 class="inspector-title">Summary &amp; Excerpt</h3>
+                <button class="button button-secondary button-sm" type="button" id="btn-auto-excerpt" title="Generate excerpt from article text">Generate</button>
+              </div>
+              <div class="field">
+                <textarea class="textarea" id="f-excerpt" name="excerpt" rows="3" placeholder="One or two sentences shown on cards and search results.">${escapeHtml(excerpt)}</textarea>
+                <span class="char-count" id="excerpt-char-count">0 characters</span>
+              </div>
+            </div>
+
+            <div class="inspector-card">
+              <h3 class="inspector-title">Media &amp; Embeds</h3>
+              <div class="field">
+                <label for="f-featured-image">Featured Image URL</label>
+                <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://…" />
+                <div class="img-preview-card" id="img-preview-card" ${article?.featured_image ? '' : 'hidden'}>
+                  <img class="img-preview-thumb" id="img-preview-thumb" src="${escapeHtml(article?.featured_image || '')}" alt="Cover preview" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="f-video-url">Video URL</label>
+                <input class="input" id="f-video-url" name="video_url" type="url" value="${escapeHtml(article?.video_url || '')}" placeholder="https://www.youtube.com/watch?v=…" />
+                <span class="video-badge" id="video-badge" ${article?.video_url ? '' : 'hidden'}>Video attached</span>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </form>
+    </div>`;
 }
 
 /**
@@ -931,8 +1033,15 @@ function imageToolConfig() {
     inlineToolbar: true,
     uploader: {
       async uploadByFile(file) {
-        const url = await uploadImage(file);
-        return { success: 1, file: { url, name: file.name } };
+        try {
+          const url = await uploadImage(file);
+          return { success: 1, file: { url, name: file.name } };
+        } catch (error) {
+          // Editor.js renders `message` inside the block instead of throwing,
+          // so an oversize file or a dropped upload is reported where the
+          // editor is looking rather than as an unhandled rejection.
+          return { success: 0, message: friendlyError(error) };
+        }
       },
     },
   };
@@ -1048,10 +1157,214 @@ async function renderArticleForm(id) {
 
     const reindexBtn = document.querySelector('#reindex-btn');
     if (reindexBtn) reindexBtn.addEventListener('click', () => reindex(article));
+
+    setupArticleFormInteractions(form, article);
   } catch (error) {
     if (!routeIsCurrent(route)) return;
     app.innerHTML = failureMarkup(friendlyError(error));
   }
+}
+
+function setupArticleFormInteractions(form, article) {
+  const draftKey = `csehub_draft_${article?.id || 'new'}`;
+  let autosaveTimer = null;
+  let metricsTimer = null;
+
+  function updateSaveIndicator(dirty) {
+    const textEl = document.querySelector('#save-status-text');
+    const dotEl = document.querySelector('.save-status-dot');
+    if (textEl) textEl.textContent = dirty ? 'Unsaved changes' : 'Draft ready';
+    if (dotEl) dotEl.classList.toggle('is-dirty', dirty);
+  }
+
+  async function updateMetrics() {
+    clearTimeout(metricsTimer);
+    metricsTimer = setTimeout(async () => {
+      const titleWords = (form.title?.value || '').trim().split(/\s+/).filter(Boolean).length;
+      let bodyWords = 0;
+      if (editor && typeof editor.save === 'function') {
+        try {
+          const content = await editor.save();
+          const plain = contentToPlainText(content, Number.MAX_SAFE_INTEGER);
+          bodyWords = plain.trim().split(/\s+/).filter(Boolean).length;
+        } catch {
+          /* editor not ready */
+        }
+      }
+      const totalWords = titleWords + bodyWords;
+      const readMin = Math.max(1, Math.round(totalWords / 200));
+      const wcEl = document.querySelector('#metric-word-count');
+      const rtEl = document.querySelector('#metric-read-time');
+      if (wcEl) wcEl.textContent = `${totalWords.toLocaleString('en-US')} words`;
+      if (rtEl) rtEl.textContent = `${readMin} min read`;
+    }, 300);
+  }
+
+  function scheduleAutosave() {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(async () => {
+      if (!editor || !isDirty()) return;
+      try {
+        const content = await editor.save();
+        const draft = {
+          title: form.title?.value || '',
+          slug: form.slug?.value || '',
+          excerpt: form.excerpt?.value || '',
+          featured_image: form.featured_image?.value || '',
+          video_url: form.video_url?.value || '',
+          category: form.category?.value || '',
+          tags: [...(form.tags?.selectedOptions || [])].map((o) => o.value),
+          is_published: Boolean(form.is_published?.checked),
+          is_featured: Boolean(form.is_featured?.checked),
+          content,
+          savedAt: Date.now(),
+        };
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+        const textEl = document.querySelector('#save-status-text');
+        const dotEl = document.querySelector('.save-status-dot');
+        if (textEl) textEl.textContent = 'Draft saved locally';
+        if (dotEl) dotEl.classList.remove('is-dirty');
+      } catch {
+        /* storage may be restricted */
+      }
+    }, 1500);
+  }
+
+  // Update handlers
+  form.addEventListener('input', () => {
+    updateSaveIndicator(true);
+    updateMetrics();
+    scheduleAutosave();
+  });
+
+  // Auto-slug
+  document.querySelector('#btn-auto-slug')?.addEventListener('click', () => {
+    const titleVal = form.title?.value || '';
+    if (titleVal && form.slug) {
+      form.slug.value = slugify(titleVal);
+      formIsDirty = true;
+      updateSaveIndicator(true);
+      scheduleAutosave();
+    }
+  });
+
+  // Auto-excerpt
+  document.querySelector('#btn-auto-excerpt')?.addEventListener('click', async () => {
+    if (editor && typeof editor.save === 'function') {
+      try {
+        const content = await editor.save();
+        const plain = contentToPlainText(content, 180);
+        if (plain && form.excerpt) {
+          form.excerpt.value = plain;
+          updateExcerptCounter();
+          formIsDirty = true;
+          updateSaveIndicator(true);
+          scheduleAutosave();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  function updateExcerptCounter() {
+    const counter = document.querySelector('#excerpt-char-count');
+    if (counter && form.excerpt) {
+      counter.textContent = `${form.excerpt.value.length} characters`;
+    }
+  }
+  form.excerpt?.addEventListener('input', updateExcerptCounter);
+  updateExcerptCounter();
+
+  function updateImagePreview() {
+    const card = document.querySelector('#img-preview-card');
+    const thumb = document.querySelector('#img-preview-thumb');
+    const url = safeUrl(form.featured_image?.value?.trim());
+    if (card && thumb) {
+      if (url) {
+        thumb.src = url;
+        card.hidden = false;
+      } else {
+        card.hidden = true;
+      }
+    }
+  }
+  form.featured_image?.addEventListener('input', updateImagePreview);
+  updateImagePreview();
+
+  function updateVideoBadge() {
+    const badge = document.querySelector('#video-badge');
+    const url = form.video_url?.value?.trim();
+    if (badge) badge.hidden = !url;
+  }
+  form.video_url?.addEventListener('input', updateVideoBadge);
+  updateVideoBadge();
+
+  function updateTagsPreview() {
+    const preview = document.querySelector('#tags-chips-preview');
+    if (!preview || !form.tags) return;
+    const selected = [...form.tags.selectedOptions].map((opt) => opt.textContent);
+    preview.innerHTML = selected.map((tag) => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join('');
+  }
+  form.tags?.addEventListener('change', updateTagsPreview);
+  updateTagsPreview();
+
+  // Mobile sidebar toggle
+  document.querySelector('#toggle-sidebar-btn')?.addEventListener('click', () => {
+    const sidebar = document.querySelector('.admin-editor-sidebar');
+    if (sidebar) sidebar.classList.toggle('is-collapsed');
+  });
+
+  // Local draft check
+  try {
+    const raw = localStorage.getItem(draftKey);
+    if (raw) {
+      const draft = JSON.parse(raw);
+      const serverTime = article?.updated_at ? new Date(article.updated_at).getTime() : 0;
+      if (draft.savedAt && draft.savedAt > serverTime + 5000) {
+        const banner = document.querySelector('#draft-banner');
+        const timeEl = document.querySelector('#draft-saved-at');
+        if (banner && timeEl) {
+          timeEl.textContent = new Date(draft.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          banner.hidden = false;
+
+          document.querySelector('#btn-restore-draft')?.addEventListener('click', () => {
+            if (draft.title) form.title.value = draft.title;
+            if (draft.slug) form.slug.value = draft.slug;
+            if (draft.excerpt) form.excerpt.value = draft.excerpt;
+            if (draft.featured_image) form.featured_image.value = draft.featured_image;
+            if (draft.video_url) form.video_url.value = draft.video_url;
+            if (draft.category) form.category.value = draft.category;
+            if (draft.is_published !== undefined) form.is_published.checked = draft.is_published;
+            if (draft.is_featured !== undefined) form.is_featured.checked = draft.is_featured;
+            if (draft.tags && form.tags) {
+              const set = new Set(draft.tags.map(String));
+              [...form.tags.options].forEach((o) => { o.selected = set.has(String(o.value)); });
+            }
+            if (draft.content && editor && typeof editor.render === 'function') {
+              editor.render(draft.content);
+            }
+            banner.hidden = true;
+            updateMetrics();
+            updateImagePreview();
+            updateVideoBadge();
+            updateTagsPreview();
+            updateExcerptCounter();
+            statusMessage('Local draft restored.', 'info');
+          });
+
+          document.querySelector('#btn-discard-draft')?.addEventListener('click', () => {
+            localStorage.removeItem(draftKey);
+            banner.hidden = true;
+          });
+        }
+      }
+    }
+  } catch {
+    /* storage unavailable */
+  }
+
+  updateMetrics();
 }
 
 
@@ -1145,6 +1458,12 @@ async function saveArticle(event, article) {
     const saved = article
       ? await updateArticle(article.id, payload)
       : await createArticle(payload);
+
+    try {
+      localStorage.removeItem(`csehub_draft_${article?.id || 'new'}`);
+    } catch {
+      /* ignore */
+    }
 
     statusMessage(
       payload.is_published

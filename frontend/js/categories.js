@@ -1,5 +1,6 @@
 import { initNavbar } from './navbar.js';
 import { getCategories, getTags, getAllPages } from './api/articles.js';
+import { friendlyError } from './api.js';
 import { escapeHtml, messageStateMarkup } from './renderer.js';
 
 const grid = document.querySelector('#category-grid');
@@ -98,10 +99,14 @@ async function loadCategories() {
           </a>`)
       .join('');
   } catch (error) {
+    console.warn('Categories unavailable', error);
     grid.innerHTML = messageStateMarkup({
       title: 'Unable to load categories',
-      message: error?.message || 'Please try again shortly.',
+      message: friendlyError(error),
+      icon: '\uD83D\uDCE1',
+      retry: true,
     });
+    grid.querySelector('[data-retry]')?.addEventListener('click', () => loadCategories());
   }
 }
 

@@ -4,7 +4,10 @@
 
 /* ── Hero ────────────────────────────────────────────────────── */
 .hero {
-  padding: 5.7rem 0 4.3rem;
+  /* Was 5.7rem/4.3rem, which put the whole of the first article row under the
+   * fold on a 1440×900 laptop. The breathing room is still there; it no longer
+   * costs the reader the content the page exists to show. */
+  padding: 4rem 0 3rem;
 }
 
 .eyebrow {
@@ -201,6 +204,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  min-height: 36px;
   padding: 0.3rem 0.7rem;
   color: var(--accent);
   background-color: var(--accent-soft);
@@ -478,6 +482,11 @@
 }
 
 .tag {
+  /* A tag is a link, and at 0.69rem it was about 17px tall — below the 24px
+   * minimum target size and awkward to hit with a thumb. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
   padding: 0.2rem 0.55rem;
   color: var(--accent-strong);
   background-color: var(--accent-soft);
@@ -549,6 +558,16 @@
   border-radius: 16px;
   max-width: 560px;
   margin: 3rem auto;
+}
+
+/* A state block rendered inside a card grid describes the whole region, not one
+ * missing card. Left in a single column it was ~300px wide — the width that made
+ * "Unable to load articles" wrap over three lines — while its two neighbours
+ * stood empty beside it. */
+.article-grid > .empty-state,
+.category-grid > .empty-state {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .empty-state-icon {
@@ -701,6 +720,11 @@
 
 /* ── Responsive: mobile ──────────────────────────────────────── */
 @media (max-width: 768px) {
+  /* The desktop hero's ~5.7rem of air above the headline is a quarter of a
+   * phone screen, and it pushed the first article below the fold. */
+  .hero {
+    padding: 2.5rem 0 2rem;
+  }
   .filters {
     grid-template-columns: 1fr;
   }

@@ -1,5 +1,6 @@
 import { initNavbar } from './navbar.js';
 import { getArticles, getCategories, normalizePage } from './api/articles.js';
+import { friendlyError } from './api.js';
 import { articleCardMarkup, messageStateMarkup, escapeHtml, skeletonCardsMarkup } from './renderer.js';
 
 function renderCards(container, articles, options) {
@@ -61,10 +62,11 @@ async function loadRecent(container) {
     console.warn('Recent articles unavailable', error);
     container.innerHTML = messageStateMarkup({
       title: 'Unable to load articles',
-      message: 'We could not reach the CSEHub API. Please try again in a moment.',
-      actionHref: 'articles.html',
-      actionLabel: 'Open the library',
+      message: friendlyError(error),
+      icon: '\uD83D\uDCE1',
+      retry: true,
     });
+    container.querySelector('[data-retry]')?.addEventListener('click', () => loadRecent(container));
   }
 }
 

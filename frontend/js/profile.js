@@ -1,4 +1,4 @@
-import { apiFetch, ApiError } from './api.js';
+import { apiFetch, friendlyError } from './api.js';
 import { initNavbar } from './navbar.js';
 import { initAuth, getAuthState, subscribeAuth, updateAuthStateProfile, refreshProfile } from './auth-state.js';
 import { logoutUser } from './auth.js';
@@ -32,7 +32,7 @@ function checkAuthAndLoadProfile() {
     }
 
     if (profileError && !profile) {
-      const message = profileError instanceof ApiError ? profileError.message : (profileError.message || 'Something went wrong while fetching your profile details.');
+      const message = friendlyError(profileError);
       profileContainer.innerHTML = `
         <div class="alert alert-error" role="alert">
           <strong>Failed to load profile:</strong> ${escapeHtml(message)}
@@ -171,7 +171,7 @@ async function saveProfile(form) {
 
   } catch (error) {
     console.error("Profile save failed:", error);
-    const message = error instanceof ApiError ? error.message : "Failed to update profile settings.";
+    const message = friendlyError(error);
     // Errors stay inline in the alert box: they often need reading more than
     // once, and a toast that disappears invites a silent save they think worked.
     alertBox.innerHTML = `

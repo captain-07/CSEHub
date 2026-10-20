@@ -210,7 +210,18 @@
 
 @media (max-width: 768px) {
   .mobile-nav-toggle {
-    display: block;
+    display: grid;
+    place-items: center;
+    /* A 24px glyph is not a 24px target; the button needs the size, not the
+     * font-size. */
+    width: 44px;
+    height: 44px;
+    margin: -0.35rem -0.5rem -0.35rem 0;
+  }
+
+  .theme-toggle {
+    width: 40px;
+    height: 40px;
   }
 
   .nav-menu {
@@ -226,12 +237,20 @@
     padding: var(--space-md);
     gap: var(--space-sm);
     box-shadow: var(--shadow);
-    max-height: calc(100vh - 76px);
+    max-height: calc(100dvh - 76px);
     overflow-y: auto;
   }
 
   .nav-menu.active {
     display: flex;
+  }
+
+  /* One row per destination, each tall enough to tap without aiming. */
+  .nav-menu .nav-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 var(--space-2xs);
   }
 
   .nav-search-input,
@@ -240,9 +259,11 @@
     max-width: none;
     /* 16px is the threshold below which iOS Safari zooms the page on focus. */
     font-size: 1rem;
+    min-height: 44px;
   }
 
   .nav-menu .nav-signin {
     width: 100%;
+    min-height: 44px;
   }
 }

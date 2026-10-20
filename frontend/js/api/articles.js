@@ -1,4 +1,4 @@
-import { apiFetch } from '../api.js';
+import { apiFetch, ApiError } from '../api.js';
 
 function toQuery(params = {}) {
   const query = new URLSearchParams();
@@ -49,6 +49,14 @@ export function deleteArticle(id) {
 /* ----------------------------------------------------------------- uploads */
 
 /**
+ * Cloudinary's free plan is the tightest ceiling in play and the one the
+ * deployed app runs against, so the client refuses anything larger instead of
+ * spending a slow upload only to be told the same thing. The backend's
+ * `STORAGE_MAX_UPLOAD_BYTES` remains the authority; this is a courtesy check.
+ */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
  * Uploads an image for an Editor.js image block and resolves to its public URL.
  *
  * The file goes to the backend rather than being inlined as a base64 data URI:
@@ -57,10 +65,19 @@ export function deleteArticle(id) {
  * sees a storage credential.
  */
 export async function uploadImage(file) {
+  if (file?.size > MAX_IMAGE_BYTES) {
+    throw new ApiError(
+      `That image is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Images must be 10 MB or smaller.`,
+      0,
+    );
+  }
+
   const form = new FormData();
   form.append('file', file);
 
-  const payload = await apiFetch('/uploads/images/', { method: 'POST', body: form });
+  // An upload is legitimately slower than an API read, so it gets its own
+  // ceiling rather than the 20s default in apiFetch.
+  const payload = await apiFetch('/uploads/images/', { method: 'POST', body: form, timeout: 120_000 });
   return payload?.url || '';
 }
 

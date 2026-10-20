@@ -12,7 +12,7 @@
  */
 
 import { getArticles, getCategories, getTags, normalizePage } from './api/articles.js';
-import { ApiError } from './api.js';
+import { friendlyError } from './api.js';
 import { initNavbar } from './navbar.js';
 import { articleCardMarkup, escapeHtml, messageStateMarkup, skeletonCardsMarkup } from './renderer.js';
 
@@ -259,10 +259,7 @@ async function renderLibrary(filters, { requestToken, contentArea, filterForm } 
   } catch (error) {
     console.error('Failed to load library data:', error);
     if (token !== requestToken.value || !contentArea) return;
-    const message = error instanceof ApiError
-      ? error.message
-      : 'Something unexpected happened while retrieving articles.';
-    contentArea.innerHTML = failureMarkup(message);
+    contentArea.innerHTML = failureMarkup(friendlyError(error));
     document.querySelector('#retry-btn')?.addEventListener('click', () => {
       renderLibrary(readFilters(), { requestToken, contentArea, filterForm });
     });
@@ -292,12 +289,18 @@ function initLibrary() {
    * Applies a filter change by updating the URL via pushState and re-rendering
    * in place — the URL stays the shareable source of truth, but the page no
    * longer reloads and loses scroll position.
+   *
+   * `replace` is for the debounced search field: typing one query is a single
+   * intent, so refinements rewrite the entry the first keystroke pushed instead
+   * of leaving Back to walk "sor", "sort", "sortin". The first search still
+   * pushes, so Back returns to the unfiltered library.
    */
-  applyFilters = (overrides) => {
+  applyFilters = (overrides, { replace = false } = {}) => {
     const next = { ...readFilters(), page: 1, ...overrides };
     const params = toUrlParams(next, { includePage: false });
     const url = `articles.html${params.toString() ? `?${params.toString()}` : ''}`;
-    window.history.pushState({}, '', url);
+    if (replace) window.history.replaceState({}, '', url);
+    else window.history.pushState({}, '', url);
     renderLibrary(next, { requestToken, contentArea, filterForm });
     // Landing at the top of the results makes the change visible; "instant"
     // skips the smooth animation which would fight repeated edits.
@@ -311,7 +314,10 @@ function initLibrary() {
     filterForm.elements.search.addEventListener('input', (event) => {
       clearTimeout(searchTimer);
       const value = event.target.value;
-      searchTimer = setTimeout(() => applyFilters({ search: value.trim() }), 450);
+      searchTimer = setTimeout(
+        () => applyFilters({ search: value.trim() }, { replace: Boolean(readFilters().search) }),
+        450,
+      );
     });
 
     filterForm.elements.category.addEventListener('change', (event) => {

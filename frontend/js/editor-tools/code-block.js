@@ -124,13 +124,14 @@ export class CodeBlockTool {
     const bar = document.createElement('div');
     bar.className = 'cdx-code__bar';
 
+    const selectId = `cdx-code-language-${Math.random().toString(36).slice(2, 9)}`;
     const label = document.createElement('label');
     label.className = 'cdx-code__label';
-    label.htmlFor = 'cdx-code-language';
+    label.htmlFor = selectId;
     label.textContent = 'Language';
 
     this.select = document.createElement('select');
-    this.select.id = 'cdx-code-language';
+    this.select.id = selectId;
     this.select.className = 'cdx-code__select';
     for (const option of codeLanguageOptions(this.normalized.language)) {
       const element = document.createElement('option');

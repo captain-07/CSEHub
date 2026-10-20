@@ -251,6 +251,13 @@ code, pre, kbd, samp {
   transition: all 0.2s ease;
 }
 
+/* A control that is waiting on the server. `disabled` alone is invisible on the
+ * secondary variant, so the cursor and the fade carry the state. */
+.button[aria-busy='true'] {
+  opacity: 0.65;
+  cursor: progress;
+}
+
 .button-primary {
   color: var(--on-accent);
   background-color: var(--accent);
@@ -426,8 +433,14 @@ code, pre, kbd, samp {
 }
 
 .toast-close {
-  margin-left: auto;
-  padding: 0 0.15rem;
+  /* 32px is the target-size floor with room to spare; it used to be the glyph's
+   * own width, about 14px, which is a hard tap on a phone. */
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -0.45rem -0.55rem -0.45rem auto;
+  padding: 0;
   background: none;
   border: none;
   cursor: pointer;

@@ -2,7 +2,7 @@
    the publishing area reads as part of CSEHub rather than a bolted-on tool. */
 
 .admin-shell {
-  padding: var(--space-lg) 0 var(--space-xl);
+  padding: var(--space-md) 0 var(--space-xl);
   min-height: 70vh;
 }
 
@@ -17,6 +17,7 @@
 .admin-heading h1 {
   font-size: var(--text-3xl);
   letter-spacing: -0.04em;
+  font-weight: 800;
 }
 
 .admin-heading p {
@@ -24,12 +25,19 @@
   margin-top: var(--space-3xs);
 }
 
+/* Quick Action Bar */
+.admin-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
+}
+
+/* Dashboard Statistics */
 .admin-stats {
   display: grid;
-  /* `auto-fit` rather than a fixed column count: the dashboard gained a "Total
-     views" card, and a fixed `repeat(4, 1fr)` left it dangling on a row of its
-     own. Tracks collapse to the card count, so four or five both fill the row. */
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-sm);
   margin-bottom: var(--space-lg);
 }
@@ -40,20 +48,29 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-md);
+  transition: border-color var(--duration-normal, 0.2s) ease;
+}
+
+.admin-stat:hover {
+  border-color: var(--accent);
 }
 
 .admin-stat strong {
   display: block;
   font-size: var(--text-2xl);
   line-height: 1.1;
+  font-weight: 800;
+  color: var(--text-primary);
 }
 
 .admin-stat span {
+  display: block;
   color: var(--text-secondary);
   font-size: var(--text-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  margin-top: var(--space-3xs);
 }
 
 .admin-panel {
@@ -62,9 +79,11 @@
 
 .admin-panel h2 {
   font-size: var(--text-xl);
+  font-weight: 700;
   margin-bottom: var(--space-sm);
 }
 
+/* Table Wrap & Table */
 .admin-table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -73,7 +92,7 @@
 .admin-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 40rem;
+  min-width: 44rem;
 }
 
 .admin-table th,
@@ -81,7 +100,7 @@
   padding: var(--space-sm) var(--space-2xs);
   border-bottom: 1px solid var(--border);
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .admin-table th {
@@ -90,37 +109,89 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  background: var(--bg-secondary);
 }
 
 .admin-table tbody tr:hover {
-  background: var(--bg-primary);
+  background: var(--accent-soft);
 }
 
 .admin-article-link {
   font-weight: 700;
   color: var(--text-primary);
   text-decoration: none;
+  font-size: var(--text-base);
+  display: inline-block;
+  line-height: 1.3;
 }
 
 .admin-article-link:hover {
   color: var(--accent);
 }
 
-.admin-article-slug {
-  display: block;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+.slug-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
   margin-top: var(--space-3xs);
 }
 
-/* The views column: right-aligned figures so they line up down the column, and
-   kept on one line so "1,204 views" never breaks in half. */
+.admin-article-slug {
+  display: inline-block;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.copy-slug-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  padding: 0.1rem 0.35rem;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+}
+
+.copy-slug-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.copy-slug-btn.is-copied {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.admin-category-pill {
+  display: inline-block;
+  font-size: var(--text-xs);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.admin-date {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* The views column: right-aligned figures */
 .admin-views {
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .admin-actions {
@@ -140,19 +211,21 @@
 .admin-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3xs);
+  align-items: center;
+  gap: var(--space-2xs);
   margin-bottom: var(--space-lg);
-  padding-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
   border-bottom: 1px solid var(--border);
 }
 
 .admin-nav-link {
-  padding: 0.3rem 0.7rem;
+  padding: 0.4rem 0.85rem;
   color: var(--text-secondary);
   border-radius: var(--radius-pill);
   font-size: var(--text-sm);
   font-weight: 700;
   text-decoration: none;
+  transition: all 0.15s ease;
 }
 
 .admin-nav-link:hover {
@@ -161,12 +234,15 @@
 }
 
 .admin-nav-link.is-active {
-  color: var(--accent);
-  background-color: var(--accent-soft);
+  color: var(--on-accent);
+  background-color: var(--accent);
 }
 
 .admin-filters {
+  display: grid;
   grid-template-columns: 2fr 1fr auto;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
 }
 
 .form-grid {
@@ -175,37 +251,315 @@
   gap: var(--space-md);
 }
 
-/* --- Article editor -------------------------------------------------- */
+/* --- Authoring Topbar & Header --------------------------------------- */
 
-.admin-form {
+.admin-editor-wrap {
   display: grid;
   gap: var(--space-md);
-  max-width: 60rem;
 }
 
-.admin-form .check-row-group {
+.admin-editor-topbar {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  position: sticky;
+  top: 72px;
+  z-index: 40;
+  backdrop-filter: blur(10px);
+}
+
+.admin-editor-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.admin-editor-topbar-center {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.admin-editor-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.admin-editor-status-pill {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-pill);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-editor-status-pill.is-published {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.admin-editor-status-pill.is-draft {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.editor-metric-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.editor-save-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.save-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  display: inline-block;
+  transition: background-color 0.2s ease;
+}
+
+.save-status-dot.is-dirty {
+  background: var(--warning);
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.15); }
+}
+
+/* Draft Recovery Alert */
+.draft-recovery-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.draft-recovery-banner[hidden] {
+  display: none !important;
+}
+
+.draft-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.button-sm {
+  min-height: 32px;
+  padding: 0.35rem 0.75rem;
+  font-size: var(--text-xs);
+}
+
+/* --- Editor Workspace Grid ------------------------------------------- */
+
+.admin-editor-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.admin-editor-main {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
   gap: var(--space-md);
 }
 
-.admin-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2xs);
-  margin-top: var(--space-2xs);
-  flex-wrap: wrap;
+.title-field-wrap {
+  width: 100%;
+}
+
+.admin-editor-title-input {
+  font-size: clamp(1.6rem, 3vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+  border: none;
+  background: transparent;
+  padding: var(--space-2xs) 0;
+  color: var(--text-primary);
+  width: 100%;
+  border-bottom: 2px solid transparent;
+  transition: border-color 0.2s ease;
+}
+
+.admin-editor-title-input:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+.admin-editor-title-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
 }
 
 .editor-holder {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-sm);
-  min-height: 18rem;
-  background: var(--bg-secondary);
+  min-height: 24rem;
+  padding: var(--space-sm) 0;
 }
 
-/* Editor.js injects its own inline code; give it the site font. */
+.editor-shortcuts-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+.editor-shortcuts-hint strong {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+/* --- Settings Inspector (Right Drawer / Sidebar) --------------------- */
+
+.admin-editor-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.inspector-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.inspector-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+}
+
+.inspector-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3xs);
+}
+
+.slug-input-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3xs);
+}
+
+.slug-btn {
+  flex-shrink: 0;
+}
+
+.char-count {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  display: block;
+  text-align: right;
+  margin-top: var(--space-3xs);
+}
+
+.img-preview-card {
+  margin-top: var(--space-2xs);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  max-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.img-preview-card[hidden] {
+  display: none !important;
+}
+
+.img-preview-thumb {
+  width: 100%;
+  height: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+
+.video-badge {
+  display: inline-block;
+  font-size: var(--text-xs);
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  margin-top: var(--space-3xs);
+  font-weight: 600;
+}
+
+.video-badge[hidden] {
+  display: none !important;
+}
+
+.tags-chips-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3xs);
+  margin-top: var(--space-2xs);
+}
+
+.tag-chip {
+  display: inline-block;
+  font-size: var(--text-xs);
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.badge-featured {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+/* --- Editor.js Injected Elements ------------------------------------- */
+
 .editor-holder .codex-editor,
 .editor-holder .ce-block__content {
   font-family: var(--font-sans);
@@ -216,16 +570,56 @@
   max-width: none;
 }
 
-/* --- Editor.js chrome in dark mode --------------------------------------
-   Editor.js ships only a light theme. It exposes its palette as custom
-   properties (`:root`, `.ce-popover`, `.ce-inline-toolbar`), so dark mode
-   re-points those instead of restyling every injected element; the handful of
-   colours its stylesheet hardcodes get an explicit override below. Without
-   this, the block toolbar, the `+`/settings popovers and the block picker stay
-   white-on-white in the dark editor. */
+.editor-holder .ce-paragraph {
+  line-height: 1.75;
+  font-size: var(--text-base);
+  margin-bottom: var(--space-xs);
+}
+
+.editor-holder h2.ce-header {
+  font-size: var(--text-2xl);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-top: var(--space-md);
+  margin-bottom: var(--space-xs);
+}
+
+.editor-holder h3.ce-header {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  margin-top: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.editor-holder h4.ce-header {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  margin-top: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+
+/* Quotes in Editor */
+.editor-holder .cdx-quote {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-sm);
+  margin: var(--space-sm) 0;
+  font-style: italic;
+  color: var(--text-primary);
+}
+
+/* Delimiter */
+.editor-holder .ce-delimiter {
+  line-height: 1.6;
+  text-align: center;
+  color: var(--border);
+  letter-spacing: 0.5em;
+  margin: var(--space-md) 0;
+}
+
+/* --- Editor.js chrome in dark mode -------------------------------------- */
 :root[data-theme='dark'] {
-  --bg-light: #1e2823;   /* toolbar + inline-tool hover fills */
-  --grayText: #9aa8a2;   /* Editor.js placeholder text */
+  --bg-light: #1e2823;
+  --grayText: #9aa8a2;
   --color-line-gray: #2c3833;
   --color-gray-border: #2c3833;
 }
@@ -291,36 +685,35 @@
   color: var(--text-secondary);
 }
 
-/* Placeholders are hardcoded grey in three separate tools. */
 :root[data-theme='dark'] .ce-paragraph[data-placeholder]:empty::before,
 :root[data-theme='dark'] .cdx-quote [contenteditable='true'][data-placeholder]::before,
 :root[data-theme='dark'] .image-tool__caption[contenteditable='true'][data-placeholder]::before {
   color: var(--text-secondary);
 }
 
-/* The image tool paints a light grey behind transparent images. */
 :root[data-theme='dark'] .image-tool {
   --bg-color: #101615;
   --border-color: var(--border);
 }
 
-/* --- Custom block tools (js/editor-tools) ---------------------------------
-   The code block deliberately mirrors the dark reading palette in article.css
-   so what an author types looks like the published snippet. */
+/* --- Custom block tools (js/editor-tools) --------------------------------- */
 
 .cdx-code {
   border: 1px solid #26322e;
   border-radius: var(--radius-md);
   background: var(--code-bg);
   overflow: hidden;
+  margin: var(--space-xs) 0;
 }
 
 .cdx-code__bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2xs);
-  padding: 0.4rem 0.75rem;
+  padding: 0.45rem 0.85rem;
   border-bottom: 1px solid #32413a;
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .cdx-code__label {
@@ -332,7 +725,7 @@
 }
 
 .cdx-code__select {
-  padding: 0.15rem 0.4rem;
+  padding: 0.2rem 0.5rem;
   color: #dae7df;
   background: #22302b;
   border: 1px solid #506157;
@@ -350,14 +743,13 @@
 .cdx-code__textarea {
   display: block;
   width: 100%;
-  padding: var(--space-xs);
+  padding: var(--space-sm);
   border: 0;
   background: transparent;
   color: #eaf1ec;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: 1.65;
-  /* No soft wrapping: long lines scroll instead of being silently re-flowed. */
   white-space: pre;
   overflow-x: auto;
   resize: vertical;
@@ -365,8 +757,6 @@
 }
 
 .cdx-code__textarea:focus-visible {
-  /* The container is the visible frame, so the ring is drawn just inside it
-   * (the holder clips its overflow) rather than around the textarea. */
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -454,7 +844,6 @@
   font-size: var(--text-xs);
 }
 
-/* The category a tag belongs to, shown after its name in the taxonomy list. */
 .taxonomy-meta {
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -470,9 +859,9 @@
   align-items: flex-start;
   justify-content: center;
   padding: var(--space-md);
-  /* Locked to stop the page behind the modal from scrolling. */
   overflow-y: auto;
-  background: rgba(var(--shade-rgb), 0.55);
+  background: rgba(var(--shade-rgb), 0.65);
+  backdrop-filter: blur(4px);
 }
 
 .modal-narrow {
@@ -489,18 +878,18 @@
   margin-bottom: var(--space-2xs);
 }
 
-/* Preview reuses the public reading styles, but inside the modal. */
 .article-preview {
   padding-top: var(--space-md);
   max-width: none;
 }
 
 .modal {
-  width: min(52rem, 100%);
+  width: min(54rem, 100%);
   background: var(--bg-secondary);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   margin: auto;
+  border: 1px solid var(--border);
 }
 
 .modal-head {
@@ -514,6 +903,7 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  z-index: 10;
 }
 
 .modal-head h2 {
@@ -525,7 +915,7 @@
   padding: var(--space-md);
 }
 
-/* The status line lives above the panel so it is visible without scrolling. */
+/* The status line lives above the panel */
 #admin-status {
   position: sticky;
   top: 76px;
@@ -539,7 +929,6 @@
   display: none;
 }
 
-/* The refused-save message lists the offending block types. */
 .admin-status-list {
   margin: var(--space-3xs) 0 0;
   padding-left: 1.25rem;
@@ -548,6 +937,13 @@
 .admin-status-list code {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
+}
+
+/* Responsive Overrides */
+@media (max-width: 1024px) {
+  .admin-editor-workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
@@ -576,12 +972,22 @@
     align-items: stretch;
   }
 
+  .admin-editor-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2xs);
+  }
+
+  .admin-editor-topbar-left,
+  .admin-editor-topbar-center,
+  .admin-editor-topbar-right {
+    justify-content: space-between;
+  }
+
   .admin-stats {
     grid-template-columns: 1fr;
   }
 
-  /* The wrapper scrolls horizontally so the table stays legible rather than
-     forcing the whole page to overflow. */
   .admin-table {
     min-width: 34rem;
   }
@@ -602,8 +1008,6 @@
     position: static;
   }
 
-  /* 16px is the threshold below which iOS Safari zooms the page on focus, so
-     the editor's own controls grow to it on small screens only. */
   .cdx-code__textarea,
   .cdx-code__select,
   .cdx-link__input {

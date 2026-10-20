@@ -5,6 +5,9 @@
   right: -450px;
   width: 450px;
   height: 100vh;
+  /* `dvh` follows the shrinking viewport when a phone's URL bar is showing, so
+   * the Send button is not left underneath it. `vh` above is the fallback. */
+  height: 100dvh;
   background-color: var(--bg-secondary);
   border-left: 1px solid var(--border);
   box-shadow: -5px 0 30px rgba(var(--shade-rgb), 0.18);
@@ -27,10 +30,9 @@
 
 .chat-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  /* `inset` rather than `width: 100vw`: 100vw includes the desktop scrollbar,
+   * so the wall reached past the page edge and could scroll sideways. */
+  inset: 0;
   background-color: rgba(var(--shade-rgb), 0.55);
   backdrop-filter: blur(2px);
   z-index: 999;
@@ -64,8 +66,15 @@
 }
 
 .chat-close-btn {
+  /* 44px is the comfortable thumb target; the glyph stays the same size. */
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -0.5rem -0.75rem -0.5rem 0;
   background: none;
   border: none;
+  border-radius: 50%;
   font-size: 1.5rem;
   cursor: pointer;
   color: var(--text-secondary);
@@ -74,6 +83,13 @@
 
 .chat-close-btn:hover {
   color: var(--text-primary);
+  background-color: rgba(var(--shade-rgb), 0.06);
+}
+
+/* While the drawer is open the article behind it must not scroll with the
+ * conversation. */
+body.chat-open {
+  overflow: hidden;
 }
 
 /* Chat Message Window */
@@ -81,6 +97,9 @@
   flex: 1;
   padding: 1.5rem;
   overflow-y: auto;
+  /* Scrolling to the end of the reply stops there instead of dragging the
+   * article underneath along with it. */
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
