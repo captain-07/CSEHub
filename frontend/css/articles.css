@@ -86,10 +86,17 @@
   color: var(--text-secondary);
 }
 
-/* ── Compact Hero (categories / articles page) ───────────────── */
+/* ── Compact Hero (categories page) ──────────────────────────── */
 .hero-compact {
   padding-top: var(--space-xl);
   padding-bottom: var(--space-md);
+}
+
+/* The library's own top rhythm. It used to open with a compact hero; with that
+ * gone the filter bar is the first thing under the sticky header, and a form
+ * flush against it reads as part of the chrome rather than the page. */
+.library-view {
+  padding-top: var(--space-lg);
 }
 
 .hero-compact h1 {
@@ -238,11 +245,14 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1.35rem;
-  /* Cards are content-sized rather than stretched to their tallest neighbour.
-     Seven of the ten articles carry no cover image, so a stretched card has
-     nothing to put in the extra height and shows it as a blank block between
-     the excerpt and the footer. Ragged rows are the honest shape. */
-  align-items: start;
+  /* Cards in a row share one height. `.card-foot` is already pushed to the
+     bottom of the flex body (`margin-top: auto`), so the spare height lands
+     between the excerpt and the footer — inside the card — instead of below a
+     short card. Ragged bottoms made a row of unequal cards read as a broken
+     layout: the "Read article" links sat at three different heights, because a
+     two-line title and a three-line excerpt each moved everything under them
+     down. Stretching is what puts those links on one line. */
+  align-items: stretch;
 }
 
 /* The featured rail is the same grid but rarely holds three cards, and two
@@ -447,6 +457,18 @@
 
 .article-card h3 a:hover {
   color: var(--accent);
+}
+
+/* A title that wraps to two lines pushes its byline, excerpt and footer a line
+   lower than the neighbours' — row 3 of the library had one short title beside
+   two long ones, so the excerpt under it began 24px higher and left a gap above
+   the footer. Reserving the second line puts every band on one baseline across
+   the row. Only above the phone tier: there is one card per row below 768px, so
+   the reservation would just add an empty line under every short title. */
+@media (min-width: 768px) {
+  .article-card h3 {
+    min-height: 2.7em; /* two lines at `line-height: 1.35` */
+  }
 }
 
 /* Byline */
@@ -719,7 +741,11 @@
 }
 
 /* ── Responsive: mobile ──────────────────────────────────────── */
-@media (max-width: 768px) {
+/* 767px, not 768: a 768px viewport is a tablet in portrait, and the 900px tier
+   already lays out two columns there. Both queries matched at exactly 768
+   before, and this one won — an iPad got one 720px-wide card per row while a
+   769px window got two, and the stacked filter bar sat above a two-up grid. */
+@media (max-width: 767px) {
   /* The desktop hero's ~5.7rem of air above the headline is a quarter of a
    * phone screen, and it pushed the first article below the fold. */
   .hero {
@@ -740,9 +766,6 @@
     grid-column: auto;
     width: 100%;
   }
-  .article-grid {
-    grid-template-columns: 1fr;
-  }
   .hero h1 {
     font-size: 2.2rem;
   }
@@ -750,6 +773,7 @@
     flex-direction: column;
     gap: 0.75rem;
   }
+  .article-grid,
   .category-grid {
     grid-template-columns: 1fr;
   }

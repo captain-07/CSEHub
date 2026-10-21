@@ -552,6 +552,12 @@ code, pre, kbd, samp {
   padding: var(--space-2xs) 0;
 }
 
+/* A group of related checkboxes (publish + featured) reads as one setting, so it
+ * gets a little air above it and no gap of its own. */
+.check-row-group {
+  margin-top: var(--space-xs);
+}
+
 .check-row input[type='checkbox'] {
   margin-top: 0.3rem;
   width: 1rem;

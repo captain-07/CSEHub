@@ -889,6 +889,12 @@ function articleFormMarkup(article) {
 
   const excerpt = article?.excerpt || contentToPlainText(article?.content, 180);
 
+  // The slug and the excerpt are both derived on creation — the server slugs the
+  // title (and disambiguates a collision to `-2`), and `collectPayload` builds
+  // the excerpt from the body — so neither is asked for on a new article. They
+  // stay editable after the first save, where they earn their place: a slug can
+  // only be corrected here, and the derived excerpt is a 180-character cut that
+  // usually lands mid-sentence.
   return `
     ${adminNav(article ? 'Articles' : 'New article')}
     <div class="admin-editor-wrap">
@@ -924,7 +930,7 @@ function articleFormMarkup(article) {
         </div>
       </div>
 
-      <form class="admin-form" id="article-form" novalidate>
+      <form id="article-form" novalidate>
         <div class="admin-editor-workspace">
           <div class="admin-editor-main">
             <div class="title-field-wrap">
@@ -944,15 +950,17 @@ function articleFormMarkup(article) {
 
           <aside class="admin-editor-sidebar">
             <div class="inspector-card">
-              <h3 class="inspector-title">Publication &amp; URL</h3>
+              <h3 class="inspector-title">${article ? 'Publication &amp; URL' : 'Publication'}</h3>
+              ${article ? `
               <div class="field">
                 <label for="f-slug">URL Slug</label>
                 <div class="slug-input-group">
-                  <input class="input" id="f-slug" name="slug" value="${escapeHtml(article?.slug || '')}" placeholder="generated-from-title" />
+                  <input class="input" id="f-slug" name="slug" value="${escapeHtml(article.slug || '')}" placeholder="generated-from-title" />
                   <button class="button button-secondary button-sm slug-btn" type="button" id="btn-auto-slug" title="Auto-generate slug from title">Auto</button>
                 </div>
                 <span class="field-hint">Public route: /article.html?slug=...</span>
               </div>
+              ` : ''}
 
               <div class="check-row-group">
                 <label class="check-row">
@@ -981,6 +989,7 @@ function articleFormMarkup(article) {
               </div>
             </div>
 
+            ${article ? `
             <div class="inspector-card">
               <div class="inspector-header-row">
                 <h3 class="inspector-title">Summary &amp; Excerpt</h3>
@@ -991,6 +1000,7 @@ function articleFormMarkup(article) {
                 <span class="char-count" id="excerpt-char-count">0 characters</span>
               </div>
             </div>
+            ` : ''}
 
             <div class="inspector-card">
               <h3 class="inspector-title">Media &amp; Embeds</h3>
@@ -1330,8 +1340,8 @@ function setupArticleFormInteractions(form, article) {
 
           document.querySelector('#btn-restore-draft')?.addEventListener('click', () => {
             if (draft.title) form.title.value = draft.title;
-            if (draft.slug) form.slug.value = draft.slug;
-            if (draft.excerpt) form.excerpt.value = draft.excerpt;
+            if (draft.slug && form.slug) form.slug.value = draft.slug;
+            if (draft.excerpt && form.excerpt) form.excerpt.value = draft.excerpt;
             if (draft.featured_image) form.featured_image.value = draft.featured_image;
             if (draft.video_url) form.video_url.value = draft.video_url;
             if (draft.category) form.category.value = draft.category;
@@ -1397,12 +1407,16 @@ async function collectPayload() {
 
   const content = await editor.save();
 
-  // Keep the excerpt useful without making the author write it twice.
-  const excerpt = form.excerpt.value.trim() || contentToPlainText(content, 180);
+  // Keep the excerpt useful without making the author write it twice. A new
+  // article has no excerpt field at all, so this is where it is actually built;
+  // on an edit the field is pre-filled and a blank one regenerates.
+  const excerpt = form.excerpt?.value.trim() || contentToPlainText(content, 180);
 
   return {
     title: form.title.value.trim(),
-    slug: form.slug.value.trim(),
+    // Blank on a new article: the server derives the slug from the title and
+    // resolves collisions, so the client must not invent one.
+    slug: form.slug?.value.trim() || '',
     excerpt,
     featured_image: safeUrl(form.featured_image.value.trim()),
     video_url: safeUrl(form.video_url.value.trim()),
