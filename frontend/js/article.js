@@ -279,7 +279,8 @@ function emptyState(title, message, actionHref = 'articles.html', actionLabel = 
  */
 function initSelectionAi(shell, article) {
   const content = shell.querySelector('.article-content');
-  if (!content) return;
+  const articleEl = shell.querySelector('article') || content;
+  if (!content || !articleEl) return;
 
   let btn = document.querySelector('#selection-ai-btn');
   if (!btn) {
@@ -312,8 +313,10 @@ function initSelectionAi(shell, article) {
     }
 
     const range = selection.getRangeAt(0);
-    // Ensure the selection is inside the article content
-    if (!content.contains(range.commonAncestorContainer)) {
+    // Ensure the selection intersects the article body
+    const isInsideArticle = articleEl.contains(range.commonAncestorContainer)
+      || (typeof range.intersectsNode === 'function' && range.intersectsNode(articleEl));
+    if (!isInsideArticle) {
       hideButton();
       return;
     }
@@ -325,22 +328,28 @@ function initSelectionAi(shell, article) {
       return;
     }
 
+    // Hide if scrolled entirely off-screen
+    if (rect.bottom < 60 || rect.top > window.innerHeight) {
+      hideButton();
+      return;
+    }
+
     btn.hidden = false;
-    const btnWidth = btn.offsetWidth || 90;
+    const btnWidth = btn.offsetWidth || 96;
     const btnHeight = btn.offsetHeight || 32;
 
     // Position above selection if there's room, otherwise below
-    const top = rect.top - btnHeight - 8 > 60
-      ? rect.top - btnHeight - 8 + window.scrollY
-      : rect.bottom + 8 + window.scrollY;
+    const top = rect.top - btnHeight - 10 > 70
+      ? rect.top - btnHeight - 10
+      : rect.bottom + 10;
 
     const left = Math.max(16, Math.min(
       window.innerWidth - btnWidth - 16,
-      rect.left + (rect.width / 2) - (btnWidth / 2) + window.scrollX
+      rect.left + (rect.width / 2) - (btnWidth / 2)
     ));
 
-    btn.style.top = `${top}px`;
-    btn.style.left = `${left}px`;
+    btn.style.top = `${Math.round(top)}px`;
+    btn.style.left = `${Math.round(left)}px`;
   };
 
   btn.addEventListener('mousedown', (event) => {
@@ -352,14 +361,14 @@ function initSelectionAi(shell, article) {
     if (!selectedText) return;
     const question = `Explain this part from the article:\n"${selectedText}"`;
     hideButton();
-    openChatForArticle(article.slug, article.title, { question, autoSend: true });
+    openChatForArticle(article.slug || article.id, article.title, { question, autoSend: true });
   });
 
-  content.addEventListener('mouseup', () => {
-    setTimeout(updateSelection, 10);
+  document.addEventListener('mouseup', () => {
+    setTimeout(updateSelection, 20);
   });
 
-  content.addEventListener('touchend', () => {
+  document.addEventListener('touchend', () => {
     setTimeout(updateSelection, 100);
   });
 
@@ -370,8 +379,11 @@ function initSelectionAi(shell, article) {
     }
   });
 
+  window.addEventListener('scroll', () => {
+    if (!btn.hidden) updateSelection();
+  }, { passive: true });
+
   window.addEventListener('resize', hideButton, { passive: true });
-  window.addEventListener('scroll', hideButton, { passive: true });
 }
 
 const VIEW_SESSION_PREFIX = 'csehub:viewed:';
@@ -500,7 +512,7 @@ async function initArticle() {
 
       const askAiBtn = document.querySelector('#ask-ai-cta-btn');
       if (askAiBtn) {
-        askAiBtn.addEventListener('click', () => openChatForArticle(article.slug, article.title));
+        askAiBtn.addEventListener('click', () => openChatForArticle(article.slug || article.id, article.title));
       }
     }
   } catch (error) {

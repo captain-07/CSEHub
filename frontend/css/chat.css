@@ -244,6 +244,20 @@ body.chat-open {
   -webkit-overflow-scrolling: touch;
 }
 
+.chat-code-block pre {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+}
+
+.chat-code-block pre code {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
 /* Inline code only — a <code> inside <pre> inherits the block styling above. */
 .chat-message :not(pre) > code {
   padding: 0.1rem 0.35rem;

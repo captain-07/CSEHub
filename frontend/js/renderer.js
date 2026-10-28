@@ -711,8 +711,10 @@ function assistantCode(code, language) {
   // fence at the end of a reply — and an empty dark box looks broken.
   if (code.trim() === '') return '';
 
-  const langLabel = language ? escapeHtml(language.trim()) : '';
-  const label = langLabel ? ` class="language-${langLabel}"` : '';
+  const raw = typeof language === 'string' ? language.trim() : '';
+  const known = HIGHLIGHT_LANGUAGES[raw.toLowerCase()] || raw;
+  const langLabel = escapeHtml(raw || known || '');
+  const label = known ? ` class="language-${escapeHtml(known)}"` : '';
   return `<div class="chat-code-block">`
     + `<div class="chat-code-header">`
     + `<span class="chat-code-lang">${langLabel || 'code'}</span>`

@@ -18,6 +18,9 @@ let busy = false;
 let previouslyFocused = null;
 
 export async function openChatForArticle(slug, title, options = {}) {
+  const isSameArticle = activeArticleSlug === slug;
+  const drawerAlreadyOpen = document.querySelector('#chat-drawer')?.classList.contains('open');
+
   activeArticleSlug = slug;
   activeArticleTitle = title;
 
@@ -34,13 +37,17 @@ export async function openChatForArticle(slug, title, options = {}) {
   }
 
   // Moved focus came here (e.g. the AI CTA button); close() sends it back.
-  previouslyFocused = document.activeElement;
+  if (!document.activeElement?.classList?.contains('selection-ai-btn')) {
+    previouslyFocused = document.activeElement;
+  }
 
   ensureChatElementsCreated();
   setArticleTitle(title);
   setDrawerOpen(true);
 
-  await loadConversationHistory();
+  if (!isSameArticle || !drawerAlreadyOpen) {
+    await loadConversationHistory();
+  }
 
   if (question) {
     const input = document.querySelector('#chat-input');
@@ -79,7 +86,11 @@ function setDrawerOpen(isOpen) {
   } else {
     // Focus restore: the control that opened the drawer regains the keyboard,
     // so Tab continues from where the reader left the page.
-    previouslyFocused?.focus?.();
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function' && !previouslyFocused.hidden) {
+      previouslyFocused.focus();
+    } else {
+      document.querySelector('#ask-ai-cta-btn')?.focus();
+    }
     previouslyFocused = null;
   }
 }
@@ -312,6 +323,7 @@ async function handleSendMessage() {
   if (!question || !activeArticleSlug) return;
 
   busy = true;
+  document.querySelector('.chat-suggestions')?.remove();
   appendMessage('user', question);
   input.value = '';
   input.disabled = true;
