@@ -86,6 +86,15 @@ function indent(textarea) {
   textarea.setRangeText(shifted, lineStart, end, 'select');
 }
 
+/** Unindent: remove up to 2 leading spaces from each line touched by the selection. */
+function unindent(textarea) {
+  const { selectionStart: start, selectionEnd: end, value } = textarea;
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const target = value.slice(lineStart, end);
+  const unshifted = target.replace(/^( {1,2})/gm, '');
+  textarea.setRangeText(unshifted, lineStart, end, 'select');
+}
+
 const TOOLBOX_ICON = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d="M7.5 5.5L3 10l4.5 4.5M12.5 5.5L17 10l-4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
@@ -124,6 +133,9 @@ export class CodeBlockTool {
     const bar = document.createElement('div');
     bar.className = 'cdx-code__bar';
 
+    const barLeft = document.createElement('div');
+    barLeft.className = 'cdx-code__bar-left';
+
     const selectId = `cdx-code-language-${Math.random().toString(36).slice(2, 9)}`;
     const label = document.createElement('label');
     label.className = 'cdx-code__label';
@@ -142,7 +154,53 @@ export class CodeBlockTool {
     this.select.value = this.normalized.language;
     this.select.disabled = this.readOnly;
 
-    bar.append(label, this.select);
+    barLeft.append(label, this.select);
+
+    const barRight = document.createElement('div');
+    barRight.className = 'cdx-code__bar-right';
+
+    this.stats = document.createElement('span');
+    this.stats.className = 'cdx-code__stats';
+
+    this.copyBtn = document.createElement('button');
+    this.copyBtn.type = 'button';
+    this.copyBtn.className = 'cdx-code__copy-btn';
+    this.copyBtn.textContent = 'Copy';
+    this.copyBtn.title = 'Copy code snippet';
+
+    let copyResetTimer = null;
+    this.copyBtn.addEventListener('click', async () => {
+      const code = this.textarea ? this.textarea.value : this.normalized.code;
+      if (!code) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(code);
+        } else {
+          const scratch = document.createElement('textarea');
+          scratch.value = code;
+          scratch.style.position = 'fixed';
+          scratch.style.opacity = '0';
+          document.body.appendChild(scratch);
+          scratch.select();
+          document.execCommand('copy');
+          scratch.remove();
+        }
+        this.copyBtn.textContent = 'Copied!';
+        this.copyBtn.classList.add('is-copied');
+        clearTimeout(copyResetTimer);
+        copyResetTimer = setTimeout(() => {
+          if (this.copyBtn) {
+            this.copyBtn.textContent = 'Copy';
+            this.copyBtn.classList.remove('is-copied');
+          }
+        }, 2000);
+      } catch (err) {
+        console.warn('Unable to copy code', err);
+      }
+    });
+
+    barRight.append(this.stats, this.copyBtn);
+    bar.append(barLeft, barRight);
 
     this.textarea = document.createElement('textarea');
     this.textarea.className = 'cdx-code__textarea';
@@ -157,18 +215,36 @@ export class CodeBlockTool {
     this.textarea.readOnly = this.readOnly;
     this.textarea.setAttribute('aria-label', 'Code');
 
-    // Tab indents instead of leaving the field. Escape is the way out, so the
-    // block never becomes a keyboard trap.
+    const updateStatsAndHeight = () => {
+      if (!this.textarea || !this.stats) return;
+      const val = this.textarea.value;
+      const lines = val ? (val.match(/\n/g) || []).length + 1 : 0;
+      this.stats.textContent = `${lines} line${lines === 1 ? '' : 's'}`;
+      this.textarea.style.height = 'auto';
+      const newHeight = Math.max(140, this.textarea.scrollHeight + 4);
+      this.textarea.style.height = `${newHeight}px`;
+    };
+
+    this.textarea.addEventListener('input', updateStatsAndHeight);
+
+    // Tab indents instead of leaving the field; Shift+Tab unindents.
+    // Escape is the way out, so the block never becomes a keyboard trap.
     this.textarea.addEventListener('keydown', (event) => {
-      if (event.key === 'Tab' && !event.shiftKey) {
+      if (event.key === 'Tab') {
         event.preventDefault();
-        indent(this.textarea);
+        if (event.shiftKey) {
+          unindent(this.textarea);
+        } else {
+          indent(this.textarea);
+        }
+        updateStatsAndHeight();
       } else if (event.key === 'Escape') {
         this.textarea.blur();
       }
     });
 
     container.append(bar, this.textarea);
+    setTimeout(updateStatsAndHeight, 0);
     return container;
   }
 
@@ -184,5 +260,7 @@ export class CodeBlockTool {
   destroy() {
     this.select = null;
     this.textarea = null;
+    this.stats = null;
+    this.copyBtn = null;
   }
 }

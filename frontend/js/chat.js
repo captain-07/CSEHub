@@ -17,9 +17,12 @@ let busy = false;
 /** Element to hand focus back to when the drawer closes. */
 let previouslyFocused = null;
 
-export async function openChatForArticle(slug, title) {
+export async function openChatForArticle(slug, title, options = {}) {
   activeArticleSlug = slug;
   activeArticleTitle = title;
+
+  const question = typeof options === 'string' ? options : (options.question || '');
+  const autoSend = typeof options === 'object' && Boolean(options.autoSend);
 
   await initAuth();
   if (!getAuthState().user) {
@@ -38,6 +41,18 @@ export async function openChatForArticle(slug, title) {
   setDrawerOpen(true);
 
   await loadConversationHistory();
+
+  if (question) {
+    const input = document.querySelector('#chat-input');
+    if (input) {
+      input.value = question;
+      if (autoSend) {
+        await handleSendMessage();
+      } else {
+        input.focus();
+      }
+    }
+  }
 }
 
 function setArticleTitle(title) {
@@ -147,6 +162,54 @@ function scrollToBottom() {
   if (container) container.scrollTop = container.scrollHeight;
 }
 
+function bindChatCodeBlocks(root) {
+  root.querySelectorAll('.chat-copy-code-btn').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const original = button.textContent;
+      try {
+        await navigator.clipboard.writeText(decodeURIComponent(button.dataset.code || ''));
+        button.textContent = 'Copied!';
+        button.classList.add('is-copied');
+      } catch (err) {
+        console.error('Failed to copy chat code to clipboard', err);
+        button.textContent = 'Press Ctrl+C';
+      }
+      setTimeout(() => {
+        button.textContent = original;
+        button.classList.remove('is-copied');
+      }, 2000);
+    });
+  });
+
+  const hljs = globalThis.hljs;
+  if (!hljs || typeof hljs.highlightElement !== 'function') return;
+
+  root.querySelectorAll('.chat-code-block pre code').forEach((el) => {
+    const requested = (el.className.match(/language-([\w+#-]+)/) || [])[1];
+    if (!requested) return;
+    if (typeof hljs.getLanguage === 'function' && !hljs.getLanguage(requested)) return;
+    try {
+      hljs.highlightElement(el);
+    } catch {
+      // Keep plain code on parse error
+    }
+  });
+}
+
+function bindSuggestionChips(root) {
+  root.querySelectorAll('.chat-suggestion-chip').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const question = button.dataset.question;
+      if (!question || busy) return;
+      const input = document.querySelector('#chat-input');
+      if (input) {
+        input.value = question;
+        await handleSendMessage();
+      }
+    });
+  });
+}
+
 function appendMessage(role, content) {
   const container = document.querySelector('#chat-messages');
   if (!container) return;
@@ -159,6 +222,11 @@ function appendMessage(role, content) {
   bubble.innerHTML = role === 'assistant'
     ? `<div>${renderAssistantMarkup(content)}</div>`
     : `<div>${escapeHtml(content).replaceAll('\n', '<br />')}</div>`;
+
+  if (role === 'assistant') {
+    bindChatCodeBlocks(bubble);
+  }
+
   container.appendChild(bubble);
   scrollToBottom();
 }
@@ -197,10 +265,22 @@ async function loadConversationHistory() {
     if (!history?.messages?.length) {
       container.innerHTML = `
         <div class="chat-message assistant">
-          Ask me about <strong>${escapeHtml(activeArticleTitle)}</strong> — I can explain a concept,
-          walk through a code block, or give you another example. I answer from this article where
-          it covers the point, and say so when I am giving a general explanation instead.
+          <div>
+            <p>Ask me about <strong>${escapeHtml(activeArticleTitle)}</strong> — I can explain a concept,
+            walk through a code block, or give you another example. I answer from this article where
+            it covers the point, and say so when I am giving a general explanation instead.</p>
+          </div>
+        </div>
+        <div class="chat-suggestions" aria-label="Suggested questions">
+          <p class="chat-suggestions-title">Suggested questions</p>
+          <div class="chat-suggestions-list">
+            <button type="button" class="chat-suggestion-chip" data-question="Explain the core intuition of this topic simply">💡 Core intuition</button>
+            <button type="button" class="chat-suggestion-chip" data-question="What are the time and space complexity trade-offs?">⏱️ Complexity breakdown</button>
+            <button type="button" class="chat-suggestion-chip" data-question="Quiz me on this concept with 2 practice questions">🧪 Quiz me</button>
+            <button type="button" class="chat-suggestion-chip" data-question="Can you give a practical code example?">💻 Practical code example</button>
+          </div>
         </div>`;
+      bindSuggestionChips(container);
       return;
     }
 

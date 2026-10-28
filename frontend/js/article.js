@@ -270,6 +270,110 @@ function emptyState(title, message, actionHref = 'articles.html', actionLabel = 
     </div>`;
 }
 
+/**
+ * Contextual AI assistant selection trigger.
+ *
+ * When a reader highlights a section of text within the article body, a floating
+ * "Ask AI" chip appears adjacent to the selection. Clicking it immediately opens
+ * the assistant drawer and submits the question quoting the selected snippet.
+ */
+function initSelectionAi(shell, article) {
+  const content = shell.querySelector('.article-content');
+  if (!content) return;
+
+  let btn = document.querySelector('#selection-ai-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'selection-ai-btn';
+    btn.className = 'selection-ai-btn';
+    btn.hidden = true;
+    btn.innerHTML = '<span class="selection-ai-icon" aria-hidden="true">✨</span><span>Ask AI</span>';
+    document.body.appendChild(btn);
+  }
+
+  const hideButton = () => {
+    btn.hidden = true;
+  };
+
+  let selectedText = '';
+
+  const updateSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+      hideButton();
+      return;
+    }
+
+    const text = selection.toString().trim();
+    if (text.length < 5 || text.length > 500) {
+      hideButton();
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    // Ensure the selection is inside the article content
+    if (!content.contains(range.commonAncestorContainer)) {
+      hideButton();
+      return;
+    }
+
+    selectedText = text;
+    const rect = range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      hideButton();
+      return;
+    }
+
+    btn.hidden = false;
+    const btnWidth = btn.offsetWidth || 90;
+    const btnHeight = btn.offsetHeight || 32;
+
+    // Position above selection if there's room, otherwise below
+    const top = rect.top - btnHeight - 8 > 60
+      ? rect.top - btnHeight - 8 + window.scrollY
+      : rect.bottom + 8 + window.scrollY;
+
+    const left = Math.max(16, Math.min(
+      window.innerWidth - btnWidth - 16,
+      rect.left + (rect.width / 2) - (btnWidth / 2) + window.scrollX
+    ));
+
+    btn.style.top = `${top}px`;
+    btn.style.left = `${left}px`;
+  };
+
+  btn.addEventListener('mousedown', (event) => {
+    // Prevent clearing the selection on mousedown before the click fires
+    event.preventDefault();
+  });
+
+  btn.addEventListener('click', () => {
+    if (!selectedText) return;
+    const question = `Explain this part from the article:\n"${selectedText}"`;
+    hideButton();
+    openChatForArticle(article.slug, article.title, { question, autoSend: true });
+  });
+
+  content.addEventListener('mouseup', () => {
+    setTimeout(updateSelection, 10);
+  });
+
+  content.addEventListener('touchend', () => {
+    setTimeout(updateSelection, 100);
+  });
+
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      hideButton();
+    }
+  });
+
+  window.addEventListener('resize', hideButton, { passive: true });
+  window.addEventListener('scroll', hideButton, { passive: true });
+}
+
 const VIEW_SESSION_PREFIX = 'csehub:viewed:';
 
 /**
@@ -392,6 +496,7 @@ async function initArticle() {
       // should not wait on that to appear.
       initReactions(shell, article);
       recordViewOnce(article);
+      initSelectionAi(shell, article);
 
       const askAiBtn = document.querySelector('#ask-ai-cta-btn');
       if (askAiBtn) {

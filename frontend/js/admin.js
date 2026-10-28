@@ -944,7 +944,7 @@ function articleFormMarkup(article) {
             </div>
 
             <div class="editor-shortcuts-hint">
-              <span><strong>Tab</strong> indent code</span> · <span><strong>Shift+Enter</strong> soft break</span> · <span><strong>Esc</strong> blur code block</span>
+              <span><strong>Tab</strong> indent code</span> · <span><strong>Shift+Tab</strong> unindent</span> · <span><strong>Shift+Enter</strong> soft break</span> · <span><strong>Esc</strong> blur code block</span>
             </div>
           </div>
 
@@ -1005,10 +1005,22 @@ function articleFormMarkup(article) {
             <div class="inspector-card">
               <h3 class="inspector-title">Media &amp; Embeds</h3>
               <div class="field">
-                <label for="f-featured-image">Featured Image URL</label>
-                <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://…" />
+                <label for="f-featured-image">Featured Image</label>
+                <div class="img-drop-zone" id="img-drop-zone">
+                  <div class="img-drop-zone__idle" id="img-drop-idle">
+                    <svg class="img-drop-zone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span>Drop image or <button type="button" class="img-drop-zone__browse" id="img-browse-btn">browse</button></span>
+                    <span class="img-drop-zone__hint">or paste a URL below</span>
+                  </div>
+                  <div class="img-drop-zone__uploading" id="img-drop-uploading" hidden>
+                    <span class="loading-spinner"></span> Uploading…
+                  </div>
+                </div>
+                <input type="file" id="img-file-input" accept="image/*" hidden />
+                <input class="input" id="f-featured-image" name="featured_image" type="url" value="${escapeHtml(article?.featured_image || '')}" placeholder="https://… or drop an image above" />
                 <div class="img-preview-card" id="img-preview-card" ${article?.featured_image ? '' : 'hidden'}>
                   <img class="img-preview-thumb" id="img-preview-thumb" src="${escapeHtml(article?.featured_image || '')}" alt="Cover preview" />
+                  <button type="button" class="img-preview-remove" id="img-remove-btn" title="Remove featured image">✕</button>
                 </div>
               </div>
 
@@ -1289,18 +1301,76 @@ function setupArticleFormInteractions(form, article) {
   function updateImagePreview() {
     const card = document.querySelector('#img-preview-card');
     const thumb = document.querySelector('#img-preview-thumb');
+    const dropZone = document.querySelector('#img-drop-zone');
     const url = safeUrl(form.featured_image?.value?.trim());
     if (card && thumb) {
       if (url) {
         thumb.src = url;
         card.hidden = false;
+        if (dropZone) dropZone.hidden = true;
       } else {
         card.hidden = true;
+        if (dropZone) dropZone.hidden = false;
       }
     }
   }
   form.featured_image?.addEventListener('input', updateImagePreview);
   updateImagePreview();
+
+  // Featured image: drag-and-drop + browse upload
+  async function handleFeaturedImageUpload(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const idle = document.querySelector('#img-drop-idle');
+    const uploading = document.querySelector('#img-drop-uploading');
+    if (idle) idle.hidden = true;
+    if (uploading) uploading.hidden = false;
+
+    try {
+      const url = await uploadImage(file);
+      if (form.featured_image) {
+        form.featured_image.value = url;
+        formIsDirty = true;
+        updateImagePreview();
+      }
+    } catch (err) {
+      statusMessage(`Image upload failed: ${friendlyError(err)}`, 'error');
+    } finally {
+      if (idle) idle.hidden = false;
+      if (uploading) uploading.hidden = true;
+    }
+  }
+
+  const dropZone = document.querySelector('#img-drop-zone');
+  if (dropZone) {
+    ['dragenter', 'dragover'].forEach((evt) => {
+      dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.add('is-drag-over'); });
+    });
+    ['dragleave', 'drop'].forEach((evt) => {
+      dropZone.addEventListener(evt, () => { dropZone.classList.remove('is-drag-over'); });
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files?.[0];
+      if (file) handleFeaturedImageUpload(file);
+    });
+  }
+
+  document.querySelector('#img-browse-btn')?.addEventListener('click', () => {
+    document.querySelector('#img-file-input')?.click();
+  });
+  document.querySelector('#img-file-input')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) handleFeaturedImageUpload(file);
+    e.target.value = '';
+  });
+
+  document.querySelector('#img-remove-btn')?.addEventListener('click', () => {
+    if (form.featured_image) {
+      form.featured_image.value = '';
+      formIsDirty = true;
+      updateImagePreview();
+    }
+  });
 
   function updateVideoBadge() {
     const badge = document.querySelector('#video-badge');
@@ -1525,19 +1595,40 @@ function openPreview() {
       const modal = document.createElement('div');
       modal.id = 'preview-modal';
       modal.className = 'modal-backdrop';
+
+      const featuredHero = payload.featured_image
+        ? `<div class="preview-hero-image"><img src="${escapeHtml(payload.featured_image)}" alt="Featured image preview" /></div>`
+        : '';
+
       modal.innerHTML = `
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+        <div class="modal modal-preview" role="dialog" aria-modal="true" aria-labelledby="preview-title">
           <header class="modal-head">
             <div>
               <p class="eyebrow">Preview — not yet saved</p>
               <h2 id="preview-title">${escapeHtml(payload.title || 'Untitled')}</h2>
             </div>
-            <button class="button button-secondary" type="button" data-close>Close</button>
+            <div class="preview-controls">
+              <div class="preview-device-switcher" role="group" aria-label="Preview width">
+                <button class="preview-device-btn is-active" type="button" data-width="100%" title="Desktop">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                </button>
+                <button class="preview-device-btn" type="button" data-width="768px" title="Tablet">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+                </button>
+                <button class="preview-device-btn" type="button" data-width="375px" title="Mobile">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                </button>
+              </div>
+              <button class="button button-secondary" type="button" data-close>Close</button>
+            </div>
           </header>
           <div class="modal-body">
-            ${payload.excerpt ? `<p class="article-excerpt">${escapeHtml(payload.excerpt)}</p>` : ''}
-            <div class="article-content article-preview">${renderArticleContent(payload.content)}</div>
-            ${videoMarkup(payload.video_url, { title: payload.title })}
+            <div class="preview-frame" id="preview-frame">
+              ${featuredHero}
+              ${payload.excerpt ? `<p class="article-excerpt">${escapeHtml(payload.excerpt)}</p>` : ''}
+              <div class="article-content article-preview">${renderArticleContent(payload.content)}</div>
+              ${videoMarkup(payload.video_url, { title: payload.title })}
+            </div>
           </div>
         </div>`;
 
@@ -1547,6 +1638,16 @@ function openPreview() {
       // The preview is rebuilt from the editor's blocks, so the snippets are
       // fresh DOM and must be highlighted after insertion.
       highlightSnippets(modal);
+
+      // Device-width switcher
+      const frame = modal.querySelector('#preview-frame');
+      for (const btn of modal.querySelectorAll('.preview-device-btn')) {
+        btn.addEventListener('click', () => {
+          for (const sibling of modal.querySelectorAll('.preview-device-btn')) sibling.classList.remove('is-active');
+          btn.classList.add('is-active');
+          if (frame) frame.style.maxWidth = btn.dataset.width;
+        });
+      }
 
       const close = () => {
         modal.remove();
