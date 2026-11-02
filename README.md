@@ -65,7 +65,7 @@ CSEHub is a computer science learning platform: a Django REST API plus a static 
 - **Dashboard and article list** — Real counts (published / drafts / total articles / total views), a per-article read tally, search, status filter, and pagination
 - **Taxonomy management** — Create and delete categories and tags
 - **Preview before publishing** — Renders the unsaved document through the same renderer the public page uses
-- **Explicit RAG indexing** — Publishing never blocks on an embedding call; admins trigger it, or run `manage.py ingest_articles`
+- **Automatic RAG indexing** — Publishing or editing a published article queues a background reindex, so the assistant never reads stale vectors; `manage.py ingest_articles` remains the repair hatch, and the editor keeps an explicit **Update AI index** action
 
 ---
 
@@ -279,7 +279,7 @@ This command is idempotent (`get_or_create`) and safe to run multiple times.
 
 ### Article Ingestion
 
-Published articles are chunked, embedded with Gemini, and stored in Pinecone (namespace `articles`) by an explicit command. Article saves never call external providers, so editorial work remains available while a provider is down. The command replaces existing deterministic vector IDs and is safe to re-run.
+Published articles are chunked, embedded with Gemini, and stored in Pinecone (namespace `articles`) automatically. A save never calls a provider itself: the signal handlers compare the indexed inputs (title, excerpt, content, publish state), queue an id after the transaction commits, and a background worker does the network work. Drafts are not indexed, and unpublishing or deleting removes the article's vectors. The command below remains the repair hatch and is safe to re-run.
 
 ```bash
 python backend/manage.py ingest_articles
@@ -291,7 +291,7 @@ python backend/manage.py ingest_articles --slug two-sum-explained
 python backend/manage.py ingest_articles --purge
 ```
 
-Admins can also index one article from the editor via **Update AI index**, which calls `POST /api/articles/{id}/reindex/`. Drafts are refused (`409`) — publish first.
+Admins can also force a reindex from the editor via **Update AI index**, which calls `POST /api/articles/{slug}/reindex/`. Drafts are refused (`409`) — publish first.
 
 > **Why `--purge` exists.** Re-ingestion replaces an article's own vectors, keyed by
 > `article_id`. It cannot remove vectors for articles that no longer exist, and because
@@ -302,7 +302,9 @@ Admins can also index one article from the editor via **Update AI index**, which
 
 Before embedding, `article_content_to_text()` flattens the Editor.js document into readable prose: headings become `Heading: …`, code blocks become `Code (python): …`, list items become `- …`, and inline markup is stripped. The vector store therefore receives meaningful text rather than JSON syntax.
 
-`build.sh` does **not** run ingestion: it needs Pinecone and Gemini credentials, and a build must not fail because an optional provider is unreachable. Run it manually after setting the RAG variables.
+`build.sh` seeds with `RAG_AUTO_INDEX=False` (a daemon worker would die when the build process exits) and then runs `ingest_articles` **only when** `PINECONE_API_KEY`, `PINECONE_INDEX_NAME` and `GEMINI_API_KEY` are all set. A provider failure is logged and does not fail the deploy; the site still serves articles.
+
+`manage.py seed` returns as soon as the rows exist, so any job it queued is lost with the process. Run `ingest_articles` after seeding when RAG is configured (the build script already does this).
 
 ### Running Tests
 
@@ -390,10 +392,12 @@ CSEHub/
 │   │   │   ├── media.py           # Admin-only image upload endpoint
 │   │   │   ├── models.py          # Category, Tag, Article, CodeSnippet
 │   │   │   ├── serializers.py
+│   │   │   ├── signals.py         # Queue a reindex on publish/edit/delete
 │   │   │   ├── urls.py
 │   │   │   └── views.py           # Public read, IsAdminUser writes
 │   │   ├── chatbot/               # RAG chatbot
 │   │   │   ├── management/commands/ingest_articles.py
+│   │   │   ├── indexing.py        # Post-commit background index worker
 │   │   │   ├── ingestion.py       # Editor.js JSON -> text -> Pinecone
 │   │   │   ├── rag_chat.py        # Gemini grounded answers
 │   │   │   ├── models.py          # Conversation, Message
@@ -625,7 +629,7 @@ Save → serializer validates the document against SUPPORTED_BLOCK_TYPES
         ↓
 JSON stored in articles.content (JSONField)
         ↓
-Published → admin clicks "Update AI index", or runs manage.py ingest_articles
+Published or edited → the signal queues a background reindex (or run manage.py ingest_articles)
         ↓
 article_content_to_text() flattens blocks to readable prose
         ↓
@@ -708,10 +712,11 @@ gunicorn core.wsgi:application --chdir backend --bind 0.0.0.0:${PORT:-8000}
 2. Install Python dependencies
 3. Collect static files (WhiteNoise)
 4. Apply database migrations
-5. Seed sample data
-6. Create superuser (if `DJANGO_SUPERUSER_*` env vars are set)
+5. Seed sample data (with auto-indexing disabled)
+6. Refresh the vector index when Pinecone and Gemini are configured
+7. Create superuser (if `DJANGO_SUPERUSER_*` env vars are set)
 
-Run `python backend/manage.py ingest_articles` separately after setting the RAG variables. A failed ingestion exits non-zero and reports failed article slugs.
+A deployment without the RAG variables still succeeds: step 6 is skipped. Run `python backend/manage.py ingest_articles` manually after changing the RAG configuration, or after a provider outage that left a reindex job unfinished.
 
 
 
@@ -724,6 +729,8 @@ The following environment variables **must** be set in production:
 - `DATABASE_URL` (Render provides this automatically for Postgres add-ons)
 
 `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, and `GEMINI_API_KEY` are additionally required only when deploying RAG ingestion/chat.
+
+`RAG_AUTO_INDEX` (default `True` outside tests) turns automatic re-indexing off without disabling the assistant. With it off, published articles reach the index only when `manage.py ingest_articles` or the editor's **Update AI index** action runs.
 
 Also set `CORS_ALLOWED_ORIGINS` (and `CSRF_TRUSTED_ORIGINS` if needed) to the Vercel frontend origin.
 

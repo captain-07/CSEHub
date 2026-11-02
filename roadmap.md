@@ -94,17 +94,24 @@ in a dashboard.
 
 ## Tier 2 — reliability & correctness
 
-### 7. `[ ]` Automate the RAG lifecycle — **M/L**
-**Why:** There are no `post_save`/`pre_delete` signals. Ingestion is manual, and
-`manage.py ingest_articles --purge` is a documented footgun: deleted articles leave
-vectors behind, and id reuse means the assistant can "answer from the *wrong* article,
+### 7. `[x]` Automate the RAG lifecycle — **M/L**
+**Why:** There were no `post_save`/`pre_delete` signals. Ingestion was manual, and
+`manage.py ingest_articles --purge` was a documented footgun: deleted articles left
+vectors behind, and id reuse meant the assistant could "answer from the *wrong* article,
 confidently".
-**What:**
-- Signal on article publish/update → re-ingest; on delete → un-ingest.
-- Add a reconciliation command comparing DB articles to the vector namespace.
-- Keep `--purge` as the repair hatch.
-**Where:** `backend/apps/chatbot/ingestion.py`, `apps/articles/signals.py` (new),
-`core/apps.py`/`apps.py` `ready()`.
+**What (implemented):**
+- `apps/articles/signals.py` compares the indexed inputs (title, excerpt, content,
+  publish state) before and after the save, then queues through `transaction.on_commit`.
+  A draft edit, an `is_featured` toggle or a view-count write costs nothing.
+- `apps/chatbot/indexing.py` owns the network work on one daemon worker per process;
+  `enqueue_reindex()` never raises, so a provider outage cannot fail an article save.
+- `remove_article_vectors()` runs on unpublish and delete. `RAG_AUTO_INDEX` (default
+  `not TESTING`) disables automation without disabling the assistant, and `build.sh`
+  seeds with it off before indexing synchronously.
+- `ingest_articles` remains the repair hatch. A stale-only reconciliation command
+  (using a stored content hash) is still open; the worker itself is not durable.
+**Where:** `backend/apps/chatbot/ingestion.py`, `apps/chatbot/indexing.py` (new),
+`apps/articles/signals.py` (new), `apps/articles/apps.py` `ready()`.
 
 ### 8. `[ ]` Real search instead of `ILIKE` — **M**
 **Why:** `search_fields = ['title', 'excerpt']` with DRF's `SearchFilter`

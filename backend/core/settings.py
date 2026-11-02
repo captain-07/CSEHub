@@ -307,3 +307,10 @@ GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
 # endpoint. Override with GEMINI_MODEL when Google retires this one too.
 GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash-lite')
 
+# Keep the vector index in step with published articles without paying for a
+# re-embedding on every save. The signals only queue an id after the saving
+# transaction commits, and `apps.chatbot.indexing` does the network work on a
+# background thread. Off under the test runner (where it would hit providers)
+# and a no-op when the Pinecone/Gemini settings above are absent.
+RAG_AUTO_INDEX = env.bool('RAG_AUTO_INDEX', default=not TESTING)
+

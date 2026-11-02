@@ -33,8 +33,18 @@ def get_vectorstore():
 
 
 def _require_rag_settings():
-    if not all((settings.PINECONE_API_KEY, settings.PINECONE_INDEX_NAME, settings.GEMINI_API_KEY)):
+    # Imported locally so `indexing` (which the article signals import) can use
+    # the same check without pulling LangChain/Pinecone in at Django startup.
+    from .indexing import rag_configured
+
+    if not rag_configured():
         raise RuntimeError('Pinecone and Gemini environment variables are required for RAG.')
+
+
+def _pinecone_index():
+    """The index every write path here talks to."""
+    _require_rag_settings()
+    return Pinecone(api_key=settings.PINECONE_API_KEY).Index(settings.PINECONE_INDEX_NAME)
 
 
 def _strip_inline_html(value) -> str:
@@ -98,10 +108,30 @@ def purge_namespace() -> None:
     to be emptied first. Pinecone's index has no dimension change here, only the
     vectors go.
     """
-    _require_rag_settings()
-    Pinecone(api_key=settings.PINECONE_API_KEY).Index(
-        settings.PINECONE_INDEX_NAME
-    ).delete(delete_all=True, namespace=NAMESPACE)
+    _pinecone_index().delete(delete_all=True, namespace=NAMESPACE)
+
+
+def remove_article_vectors(article_id) -> None:
+    """Delete every vector belonging to one article.
+
+    Called when an article is unpublished or deleted. Without this, the vectors
+    outlive the row and a filtered similarity search can still match their text,
+    so the assistant answers from content no reader can reach (or from a
+    different article, once ids are reused).
+
+    Safe to call for an article that was never indexed: an empty namespace is
+    the normal state on a fresh deployment.
+    """
+    try:
+        _pinecone_index().delete(
+            filter={"article_id": str(article_id)},
+            namespace=NAMESPACE,
+        )
+    except Exception as exc:
+        # Pinecone reports a missing namespace on the first write of a fresh
+        # index. There is nothing to delete in that case.
+        if "Namespace not found" not in str(exc):
+            raise
 
 
 def ingest_article(article) -> int:
@@ -117,14 +147,7 @@ def ingest_article(article) -> int:
         Number of chunks stored.
     """
 
-    _require_rag_settings()
-    pc = Pinecone(
-        api_key=settings.PINECONE_API_KEY
-    )
-
-    index = pc.Index(
-        settings.PINECONE_INDEX_NAME
-    )
+    index = _pinecone_index()
 
     # Delete existing vectors for this article.
     # During the first ingestion, the namespace may not exist yet.
@@ -146,7 +169,16 @@ def ingest_article(article) -> int:
         chunk_overlap=50,
     )
 
-    full_text = f"{article.title}\n\n{article_content_to_text(article.content)}"
+    # The excerpt is a human-written summary of the same material, so it is a
+    # cheap retrieval signal; leaving it out made the indexed text strictly
+    # poorer than the card a reader searches from.
+    full_text = '\n\n'.join(
+        part for part in (
+            article.title,
+            article.excerpt,
+            article_content_to_text(article.content),
+        ) if part
+    )
 
     chunks = splitter.split_text(full_text)
 

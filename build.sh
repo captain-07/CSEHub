@@ -29,7 +29,17 @@ cd backend
 
 python manage.py collectstatic --noinput
 python manage.py migrate --noinput
-python manage.py seed
+
+# The seed creates published articles, but a background index job started here
+# would die with the process. Queue nothing and index synchronously below.
+RAG_AUTO_INDEX=False python manage.py seed
+
+# Keep the vector index in step with the seeded library. Skipped when the RAG
+# settings are absent, and a provider outage must not fail the deploy: the site
+# still serves articles, and a later reindex repairs the assistant.
+if [[ -n "${PINECONE_API_KEY:-}" && -n "${PINECONE_INDEX_NAME:-}" && -n "${GEMINI_API_KEY:-}" ]]; then
+  python manage.py ingest_articles || echo "RAG ingestion failed; continuing without a refreshed index."
+fi
 
 # Create superuser only when all required env vars are provided.
 if [[ -n "${DJANGO_SUPERUSER_EMAIL:-}" && -n "${DJANGO_SUPERUSER_USERNAME:-}" && -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
