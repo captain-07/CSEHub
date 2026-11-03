@@ -3,6 +3,7 @@ import { ApiError, friendlyError } from './api.js';
 import { initNavbar } from './navbar.js';
 import { openChatForArticle } from './chat.js';
 import { initReactions } from './reactions.js';
+import { initQuiz } from './quiz.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, readingTime,
   contentToPlainText, snippetMarkup, highlightSnippets, videoMarkup,
@@ -484,6 +485,31 @@ async function initArticle() {
 
           ${videoMarkup(article.video_url, { title: article.title })}
 
+          ${article.quiz_question_count ? `
+            <section class="article-quiz" id="article-quiz">
+              <div class="article-quiz-intro">
+                <h2 class="article-quiz-title">Quiz me</h2>
+                <p class="article-quiz-copy">
+                  Test yourself on this article with up to 5 quick multiple-choice
+                  questions, one at a time. You will get a score at the end.
+                </p>
+              </div>
+              <button class="button button-primary" type="button" id="quiz-start">Start quiz</button>
+            </section>
+
+            <dialog class="quiz-modal" id="quiz-modal" aria-labelledby="quiz-modal-title" aria-describedby="quiz-modal-subtitle">
+              <div class="quiz-modal-inner">
+                <header class="quiz-modal-header">
+                  <div class="quiz-modal-heading">
+                    <h2 class="quiz-modal-title" id="quiz-modal-title">Quiz me</h2>
+                    <p class="quiz-modal-subtitle" id="quiz-modal-subtitle"></p>
+                  </div>
+                  <button class="quiz-modal-close" type="button" data-quiz-action="cancel" aria-label="Close quiz">&times;</button>
+                </header>
+                <div class="quiz-panel" id="quiz-panel"></div>
+              </div>
+            </dialog>` : ''}
+
           <div class="article-reactions" id="article-reactions" data-article-key="${escapeHtml(articleKey)}"></div>
 
           <section class="article-ai-cta">
@@ -507,6 +533,7 @@ async function initArticle() {
       // Not awaited: it resolves the Supabase session first, and the article
       // should not wait on that to appear.
       initReactions(shell, article);
+      initQuiz(shell, article);
       recordViewOnce(article);
       initSelectionAi(shell, article);
 

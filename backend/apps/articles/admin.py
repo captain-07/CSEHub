@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.db.models import Q
-from .models import Category, Tag, Article, ArticleReaction, ArticleTag, CodeSnippet
+from .models import (
+    Category, Tag, Article, ArticleReaction, ArticleTag, CodeSnippet, QuizQuestion,
+)
 
 
 class TagInline(admin.TabularInline):
@@ -78,6 +80,27 @@ class ArticleAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return self.has_change_permission(request, obj)
+
+
+@admin.register(QuizQuestion)
+class QuizQuestionAdmin(admin.ModelAdmin):
+    """The authoring surface for the hand-written quiz.
+
+    Questions are written and reviewed here; the article page only ever reads
+    them. `clean()` on the model is what rejects a missing or duplicate option,
+    because the admin form runs `full_clean()`.
+    """
+
+    list_display = ['prompt', 'article', 'correct_option', 'is_active', 'created_at']
+    list_filter = ['is_active']
+    search_fields = ['prompt', 'article__title']
+    autocomplete_fields = ['article']
+    list_select_related = ['article']
+    fields = [
+        'article', 'prompt',
+        'option_a', 'option_b', 'option_c', 'option_d',
+        'correct_option', 'explanation', 'is_active',
+    ]
 
 
 @admin.register(ArticleReaction)

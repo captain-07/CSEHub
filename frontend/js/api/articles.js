@@ -124,6 +124,32 @@ export function recordArticleView(id) {
   return apiFetch(`/articles/${encodeURIComponent(id)}/view/`, { method: 'POST' });
 }
 
+/* --------------------------------------------------------------------- quiz */
+
+/**
+ * Fetches up to five randomly ordered questions for an article.
+ *
+ * The payload deliberately contains no answer key. Each retake calls this again,
+ * so both the question order and the option order change.
+ */
+export function getArticleQuiz(id) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/quiz/`);
+}
+
+/**
+ * Grades an attempt without storing it.
+ *
+ * Resolves to `{ score, total, percent, results }`, where each result carries
+ * the chosen option, the correct option and an optional explanation. Nothing
+ * is written server-side, so this can be called as often as the reader likes.
+ */
+export function submitArticleQuiz(id, answers) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/quiz/submit/`, {
+    method: 'POST',
+    body: { answers },
+  });
+}
+
 /**
  * Follows DRF's `next` links and concatenates every page.
  *

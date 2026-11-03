@@ -1,3 +1,7 @@
+import logging
+import random
+
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
@@ -15,10 +19,14 @@ from .serializers import (
     CategorySerializer, TagSerializer,
     ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer,
     ReactionRequestSerializer, ReactionResultSerializer, ViewResultSerializer,
+    QuizPayloadSerializer, QuizResultSerializer, QuizSubmissionSerializer,
 )
-import logging
 
 logger = logging.getLogger(__name__)
+
+# How many questions one quiz session shows. An article may carry more; the
+# rest stay in the bank and turn up on a later retake.
+MAX_QUIZ_QUESTIONS = 5
 
 
 class AdminWriteOrReadAnyMixin:
@@ -301,6 +309,114 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
             return Response({'view_count': article.view_count})
 
         return Response({'view_count': article.record_view()})
+
+    @extend_schema(request=None, responses={200: QuizPayloadSerializer})
+    @action(detail=True, methods=['get'])
+    def quiz(self, request, slug=None, **kwargs):
+        """Return up to five random questions for this article.
+
+        Public, because a quiz is a reading aid and must not require an account.
+        The action is deliberately absent from ADMIN_ACTIONS and
+        AUTHENTICATED_ACTIONS: the mixin already hands unrecognised actions
+        `AllowAny`, which is exactly what this needs.
+
+        Both the question order and each question's option order are shuffled on
+        every request, so a retake is genuinely a different quiz. `correct_option`
+        and `explanation` are never sent here — the answer key only appears in
+        the response to `quiz/submit/`.
+        """
+        article = self.get_object()
+        questions = list(article.quiz_questions.filter(is_active=True))
+        questions = random.sample(
+            questions, min(MAX_QUIZ_QUESTIONS, len(questions))
+        )
+
+        payload = []
+        for question in questions:
+            options = [
+                {'id': index, 'text': question.option_text(index)}
+                for index in range(len(question.OPTION_FIELDS))
+            ]
+            random.shuffle(options)
+            payload.append({
+                'id': question.id,
+                'prompt': question.prompt,
+                'options': options,
+            })
+
+        return Response({'questions': payload, 'total': len(payload)})
+
+    @extend_schema(
+        request=QuizSubmissionSerializer,
+        responses={200: QuizResultSerializer},
+        summary='Grade a quiz attempt',
+        description=(
+            'Grades the submitted answers and returns a score. Nothing is stored: '
+            'there is no attempt table and no "already taken" state, so the same '
+            'reader can retake the quiz immediately and get a fresh random order. '
+            'The correct options and explanations are revealed here, after the '
+            'reader has committed to an answer.'
+        ),
+    )
+    @action(detail=True, methods=['post'], url_path='quiz/submit')
+    def quiz_submit(self, request, slug=None, **kwargs):
+        """Grade one attempt without persisting it.
+
+        Public for the same reason as `quiz`: anonymous readers are the point.
+        Each question may be answered once, and every id must belong to this
+        article, so a client cannot grade questions it was never shown.
+        """
+        article = self.get_object()
+
+        serializer = QuizSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        answers = serializer.validated_data['answers']
+
+        if len(answers) > MAX_QUIZ_QUESTIONS:
+            raise drf_serializers.ValidationError(
+                {'answers': f'An attempt may contain at most {MAX_QUIZ_QUESTIONS} answers.'}
+            )
+
+        question_ids = [answer['question_id'] for answer in answers]
+        if len(question_ids) != len(set(question_ids)):
+            raise drf_serializers.ValidationError(
+                {'answers': 'Each question may be answered only once.'}
+            )
+
+        questions = {
+            question.id: question
+            for question in article.quiz_questions.filter(
+                id__in=question_ids, is_active=True
+            )
+        }
+        if len(questions) != len(answers):
+            raise drf_serializers.ValidationError(
+                {'answers': 'One or more questions do not belong to this article.'}
+            )
+
+        results = []
+        for answer in answers:
+            question = questions[answer['question_id']]
+            is_correct = question.correct_option == answer['option_id']
+            results.append({
+                'question_id': question.id,
+                'chosen_option_id': answer['option_id'],
+                'correct_option_id': question.correct_option,
+                'is_correct': is_correct,
+                'explanation': question.explanation,
+            })
+
+        score = sum(1 for result in results if result['is_correct'])
+        total = len(results)
+
+        return Response({
+            'score': score,
+            'total': total,
+            # Equal weight per question; computed only on the server so the
+            # client never has to agree on a rounding rule.
+            'percent': round(score * 100 / total) if total else 0,
+            'results': results,
+        })
 
     @action(detail=True, methods=['post'])
     def reindex(self, request, slug=None, **kwargs):

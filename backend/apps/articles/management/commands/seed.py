@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from apps.articles.models import Category, Tag, Article, ArticleTag, CodeSnippet
+from apps.articles.models import (
+    Category, Tag, Article, ArticleTag, CodeSnippet, QuizQuestion,
+)
 
 
 # Editor.js documents are verbose to write inline, so blocks are built from
@@ -507,7 +509,637 @@ ORDER BY slug;'''),
             link('https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancing', 'Envoy: load balancing'),
         ),
     },
+    {
+        'slug': 'big-o-without-hand-waving',
+        'title': 'Big-O Without the Hand-Waving',
+        'excerpt': (
+            'A practical guide to reading growth rates, dropping constants, and '
+            'knowing which complexity claim is actually being made.'
+        ),
+        'category': 'core-cs',
+        'tags': ['array', 'dp'],
+        'is_featured': True,
+        'is_published': True,
+        'content': document(
+            heading('What Big-O actually claims'),
+            para(
+                'Big-O describes how the work grows as the input grows. It deliberately '
+                'ignores constants, hardware, and small inputs. That makes it useful for '
+                'comparing algorithms and useless for predicting whether a particular '
+                'function takes 2 ms or 20 ms.'
+            ),
+            heading('The three rules'),
+            steps(
+                'Drop constant factors: <code>3n</code> and <code>n</code> are both '
+                '<code>O(n)</code>.',
+                'Keep the fastest-growing term: <code>n^2 + n</code> is <code>O(n^2)</code> '
+                'for large <code>n</code>.',
+                'Nested loops multiply; sequential loops add. Two separate <code>n</code> '
+                'passes are still <code>O(n)</code>.',
+            ),
+            heading('The common classes'),
+            bullets(
+                '<code>O(1)</code> — a hash lookup or array index.',
+                '<code>O(log n)</code> — binary search; the range halves each step.',
+                '<code>O(n)</code> — one pass over the input.',
+                '<code>O(n log n)</code> — comparison sorting, or a linear pass inside a '
+                'divide-and-conquer recursion.',
+                '<code>O(n^2)</code> — a nested pass over the same collection.',
+                '<code>O(2^n)</code> — exploring every subset; fine only for tiny inputs.',
+            ),
+            heading('A worked example'),
+            para(
+                'This function looks like it does two things, but the second loop runs '
+                'over the input again. The total is <code>O(n)</code>, not '
+                '<code>O(n^2)</code>.'
+            ),
+            code('python', '''def summarise(items):
+    total = 0
+    for item in items:       # n steps
+        total += item
+
+    positives = 0
+    for item in items:       # another n steps
+        if item > 0:
+            positives += 1
+
+    return total, positives'''),
+            heading('Worst case, average case, amortised'),
+            para(
+                'Big-O on its own does not say which case it is describing. A hash map '
+                'lookup is <code>O(1)</code> on average and <code>O(n)</code> in the '
+                'worst case when every key collides. A dynamic array append is '
+                '<code>O(1)</code> amortised because the occasional resize is paid for '
+                'by the many cheap appends before it.'
+            ),
+            quote(
+                'Big-O is a shape, not a stopwatch. Say which case you mean, or the '
+                'claim is incomplete.',
+                caption='The habit worth building',
+            ),
+            heading('What Big-O hides'),
+            para(
+                'Constants matter at real input sizes. An <code>O(n log n)</code> sort '
+                'with a large constant can lose to an <code>O(n^2)</code> insertion sort '
+                'on a hundred elements. Cache locality, allocation, and branch '
+                'prediction are invisible to the notation but very visible in a profiler.'
+            ),
+            DIVIDER,
+            heading('How to answer in an interview'),
+            steps(
+                'Name the input that the complexity is measured against.',
+                'Count the loops and the work inside them, not the lines of code.',
+                'Separate the data structure costs from the algorithm costs.',
+                'State the case: best, average, worst, or amortised.',
+            ),
+        ),
+    },
+    {
+        'slug': 'http-caching-in-practice',
+        'title': 'HTTP Caching in Practice',
+        'excerpt': (
+            'Freshness, validation, and the headers that decide whether a request '
+            'ever reaches your server.'
+        ),
+        'category': 'web-dev',
+        'tags': [],
+        'is_featured': False,
+        'is_published': True,
+        'content': document(
+            heading('Two different questions'),
+            para(
+                'A cache asks two things: may I reuse this response without asking the '
+                'server, and if I must ask, can the server tell me nothing changed? The '
+                'first is freshness; the second is validation.'
+            ),
+            heading('Freshness: max-age'),
+            para(
+                '<code>Cache-Control: max-age=60</code> says the response is fresh for '
+                'sixty seconds. While it is fresh, the browser may reuse it without a '
+                'network request. After that it becomes stale, but stale does not mean '
+                'unusable.'
+            ),
+            code('http', '''Cache-Control: public, max-age=60, stale-while-revalidate=30'''),
+            heading('Validation: ETag and If-None-Match'),
+            para(
+                'An <code>ETag</code> is a fingerprint of the representation. On the next '
+                'request the browser sends it back as <code>If-None-Match</code>. If the '
+                'resource still has the same fingerprint, the server answers '
+                '<code>304 Not Modified</code> with no body.'
+            ),
+            steps(
+                'The browser caches the response and its <code>ETag</code>.',
+                'The response becomes stale.',
+                'The browser sends <code>If-None-Match: "abc123"</code>.',
+                'The server compares the tag and returns <code>304</code> or a fresh '
+                '<code>200</code>.',
+            ),
+            heading('public, private, and no-store'),
+            bullets(
+                '<code>public</code> — any shared cache, including a CDN, may store it.',
+                '<code>private</code> — only the browser may store it; a CDN must not.',
+                '<code>no-store</code> — do not write it to disk at all. Use it for '
+                'secrets and personalised data.',
+                '<code>no-cache</code> — store it, but validate before every reuse. This '
+                'is not the same as <code>no-store</code>.',
+            ),
+            heading('The mistakes that bite'),
+            bullets(
+                'Caching an authenticated response as <code>public</code>, then serving '
+                'it to another user.',
+                'Forgetting <code>Vary: Accept-Encoding</code> when the response differs '
+                'by compression.',
+                'Setting a long <code>max-age</code> on HTML that points at hashed '
+                'assets, instead of caching the hashed assets forever and the HTML '
+                'briefly.',
+                'Treating <code>no-cache</code> as "do not cache"; it means "revalidate '
+                'first".',
+            ),
+            quote(
+                'Cache the immutable thing for a year. Cache the pointer to it for a '
+                'minute.',
+                caption='The asset strategy in one line',
+            ),
+            heading('A cache is a contract'),
+            para(
+                'Every cache header is a promise about who may store the response and '
+                'for how long. A wrong promise is not a performance bug; it is a '
+                'correctness bug that shows up as one user seeing another user’s data.'
+            ),
+        ),
+    },
+    {
+        'slug': 'cap-theorem-in-practice',
+        'title': 'The CAP Theorem in Practice',
+        'excerpt': (
+            'What consistency, availability, and partition tolerance actually force '
+            'you to choose when the network fails.'
+        ),
+        'category': 'system-design',
+        'tags': ['graph'],
+        'is_featured': False,
+        'is_published': True,
+        'content': document(
+            heading('The theorem, stated honestly'),
+            para(
+                'CAP says that when a network partition occurs, a distributed system '
+                'must choose between consistency and availability. It does not say you '
+                'pick two of three all the time; partitions are rare, and the choice '
+                'only becomes visible while one is happening.'
+            ),
+            heading('What the letters mean'),
+            bullets(
+                '<b>Consistency</b> — every read sees the most recent write. This is '
+                'stronger than the C in ACID.',
+                '<b>Availability</b> — every request to a non-failing node gets a '
+                'non-error response, without a guarantee that it is the latest write.',
+                '<b>Partition tolerance</b> — the system keeps operating when messages '
+                'between nodes are lost or delayed.',
+            ),
+            heading('CP versus AP'),
+            para(
+                'A CP system refuses reads or writes it cannot prove are current. A '
+                'banking ledger usually prefers this: an error is better than a wrong '
+                'balance. An AP system keeps answering and reconciles later. A social '
+                'feed usually prefers this: a slightly stale post is better than a '
+                'failed page load.'
+            ),
+            code('text', '''Partition occurs:
+  CP -> reject the request, preserve a single truth
+  AP -> answer from the local replica, converge afterwards'''),
+            heading('The part people forget'),
+            para(
+                'Partition tolerance is not optional. You can choose to give up '
+                'consistency or availability during a partition, but you cannot choose '
+                'to make the network reliable. The real design question is what the '
+                'system does while the partition lasts.'
+            ),
+            heading('Beyond CAP: latency'),
+            para(
+                'PACELC extends the idea: if there is a partition, choose availability '
+                'or consistency; else, choose latency or consistency. Even with a '
+                'healthy network, a strongly consistent read may have to wait for a '
+                'quorum, and that wait is a product decision.'
+            ),
+            quote(
+                'CAP is a question about the worst minute, not the normal day.',
+                caption='Why the theorem is easy to misquote',
+            ),
+            heading('A practical checklist'),
+            steps(
+                'Name the operation that must never return stale data.',
+                'Decide what a request should do when that operation cannot reach a '
+                'quorum.',
+                'Write down how the system reconciles after the partition heals.',
+                'Measure the latency cost of the consistency you chose.',
+            ),
+        ),
+    },
 ]
+
+
+# Questions for the "Quiz me" button. Keyed by article slug so the seed can
+# skip an article that does not exist (or was renamed) rather than failing the
+# whole command. Each entry is four options plus the zero-based correct one.
+# `get_or_create` is keyed on the prompt, so re-seeding never overwrites a
+# question an editor has since rewritten.
+QUIZ_QUESTIONS = {
+    'two-sum-explained': [
+        {
+            'prompt': 'Which data structure does the walkthrough use to find the complement?',
+            'options': ['A hash map', 'A sorted array', 'A linked list', 'A stack'],
+            'correct': 0,
+            'explanation': (
+                'The solution stores each value it has seen in a hash map, so the '
+                'complement of the current number can be looked up in constant time.'
+            ),
+        },
+        {
+            'prompt': 'What does the hash map hold for each number that has been seen?',
+            'options': ['Its index', 'Its complement', 'Its frequency', 'Its square'],
+            'correct': 0,
+            'explanation': (
+                'The map is keyed by the number and stores its index, because the '
+                'answer is a pair of indices rather than the values themselves.'
+            ),
+        },
+        {
+            'prompt': 'What is the time complexity of the one-pass hash map solution?',
+            'options': ['O(n)', 'O(log n)', 'O(n log n)', 'O(n^2)'],
+            'correct': 0,
+            'explanation': (
+                'Each element is visited once and each hash map lookup is O(1) on '
+                'average, so the whole pass is O(n).'
+            ),
+        },
+        {
+            'prompt': 'Why does the solution check the map before inserting the current number?',
+            'options': [
+                'It prevents a number from matching itself',
+                'It keeps the map sorted',
+                'It avoids duplicate indices in the output',
+                'It reduces the space complexity',
+            ],
+            'correct': 0,
+            'explanation': (
+                'Checking first means the current number cannot be paired with '
+                'itself; the match must come from an earlier index.'
+            ),
+        },
+        {
+            'prompt': 'What is the space complexity of the solution?',
+            'options': ['O(n)', 'O(1)', 'O(log n)', 'O(n^2)'],
+            'correct': 0,
+            'explanation': (
+                'In the worst case the map holds every number before the pair is '
+                'found, which grows linearly with the input.'
+            ),
+        },
+    ],
+    'binary-search-boundaries': [
+        {
+            'prompt': 'What must be true of the input before binary search can be used?',
+            'options': [
+                'It must be sorted',
+                'It must contain no duplicates',
+                'It must have an even length',
+                'It must fit in memory',
+            ],
+            'correct': 0,
+            'explanation': (
+                'The algorithm discards half the range based on one comparison, '
+                'which is only valid when the data is ordered.'
+            ),
+        },
+        {
+            'prompt': 'What is the time complexity of binary search?',
+            'options': ['O(log n)', 'O(n)', 'O(n log n)', 'O(1)'],
+            'correct': 0,
+            'explanation': (
+                'Each comparison halves the candidate range, so the number of '
+                'steps grows with the logarithm of the input size.'
+            ),
+        },
+        {
+            'prompt': 'In the half-open formulation, when is the range [lo, hi) empty?',
+            'options': ['When lo == hi', 'When lo > hi', 'When lo == 0', 'When hi == n'],
+            'correct': 0,
+            'explanation': (
+                'A half-open range includes lo but excludes hi, so it contains '
+                'nothing exactly when the two bounds meet.'
+            ),
+        },
+        {
+            'prompt': 'Why does the article use lo = mid + 1 after a low comparison?',
+            'options': [
+                'mid is known not to be the target, so it can be discarded',
+                'It keeps mid in the range for the next step',
+                'It avoids an infinite loop in Python only',
+                'It makes the midpoint calculation simpler',
+            ],
+            'correct': 0,
+            'explanation': (
+                'If the value at mid is too small, mid itself cannot be the '
+                'answer; leaving it in the range can shrink the low side by only '
+                'one element at a time.'
+            ),
+        },
+        {
+            'prompt': 'Which midpoint expression stays safe in a language with fixed-width integers?',
+            'options': [
+                'lo + (hi - lo) // 2',
+                '(lo + hi) // 2',
+                'hi - (lo + hi) // 2',
+                '(lo * hi) // 2',
+            ],
+            'correct': 0,
+            'explanation': (
+                'Subtracting first keeps the sum from overflowing. The two forms '
+                'agree in Python, where integers have arbitrary precision, but not '
+                'in every language.'
+            ),
+        },
+    ],
+    'big-o-without-hand-waving': [
+        {
+            'prompt': 'What does Big-O primarily describe?',
+            'options': [
+                'The exact running time in milliseconds',
+                'The number of lines in a function',
+                'How work grows as the input size grows',
+                'Peak memory use only',
+            ],
+            'correct': 2,
+            'explanation': (
+                'Big-O is a growth-rate notation. It compares how the work scales, '
+                'not how long a particular machine takes.'
+            ),
+        },
+        {
+            'prompt': 'Simplify 3n + 5.',
+            'options': ['O(3n)', 'O(n)', 'O(5)', 'O(n^2)'],
+            'correct': 1,
+            'explanation': (
+                'Constant factors and lower-order terms are dropped, leaving O(n).'
+            ),
+        },
+        {
+            'prompt': 'Simplify n^2 + n.',
+            'options': ['O(n)', 'O(n^2 + n)', 'O(n^2)', 'O(2n)'],
+            'correct': 2,
+            'explanation': (
+                'For large n the n^2 term dominates, so the lower-order n term is '
+                'dropped.'
+            ),
+        },
+        {
+            'prompt': 'Two separate loops, each over all n items, are…',
+            'options': ['O(n)', 'O(n^2)', 'O(log n)', 'O(2^n)'],
+            'correct': 0,
+            'explanation': (
+                'Sequential loops add: n + n is still linear, so the result is O(n).'
+            ),
+        },
+        {
+            'prompt': 'A loop over n items containing another loop over n items is…',
+            'options': ['O(n)', 'O(log n)', 'O(n log n)', 'O(n^2)'],
+            'correct': 3,
+            'explanation': (
+                'Nested loops multiply: n work for the outer loop times n work for '
+                'the inner loop gives O(n^2).'
+            ),
+        },
+        {
+            'prompt': 'Binary search on a sorted array is…',
+            'options': ['O(1)', 'O(log n)', 'O(n)', 'O(n log n)'],
+            'correct': 1,
+            'explanation': (
+                'Each comparison halves the candidate range, which produces a '
+                'logarithmic number of steps.'
+            ),
+        },
+        {
+            'prompt': 'A comparison sort is typically…',
+            'options': ['O(n)', 'O(log n)', 'O(n log n)', 'O(2^n)'],
+            'correct': 2,
+            'explanation': (
+                'Comparison sorting has a well-known O(n log n) lower bound for the '
+                'general case.'
+            ),
+        },
+        {
+            'prompt': 'A hash map lookup is, on average…',
+            'options': ['O(1)', 'O(log n)', 'O(n)', 'O(n^2)'],
+            'correct': 0,
+            'explanation': (
+                'With a good hash function the key maps directly to a bucket, so '
+                'the expected lookup cost is constant.'
+            ),
+        },
+        {
+            'prompt': 'A hash map lookup with every key colliding is, in the worst case…',
+            'options': ['O(1)', 'O(log n)', 'O(n/2)', 'O(n)'],
+            'correct': 3,
+            'explanation': (
+                'If every key lands in the same bucket, the lookup may scan all n '
+                'entries, which is O(n).'
+            ),
+        },
+        {
+            'prompt': 'Appending to a dynamic array is…',
+            'options': [
+                'O(n) every time',
+                'O(1) amortised',
+                'O(log n) amortised',
+                'O(n log n) amortised',
+            ],
+            'correct': 1,
+            'explanation': (
+                'A resize copies the array, but the many cheap appends between '
+                'resizes pay for it, so the amortised cost is constant.'
+            ),
+        },
+        {
+            'prompt': 'Which statement about Big-O is false?',
+            'options': [
+                'It ignores constant factors',
+                'It describes growth rather than exact time',
+                'It can hide cache and allocation costs',
+                'It predicts exact milliseconds on real hardware',
+            ],
+            'correct': 3,
+            'explanation': (
+                'Big-O says nothing about exact wall-clock time; constants, cache '
+                'behaviour, and hardware all matter in practice.'
+            ),
+        },
+        {
+            'prompt': (
+                'Why can an O(n^2) insertion sort beat an O(n log n) sort on a '
+                'small array?'
+            ),
+            'options': [
+                'Its constant factors and overhead are smaller',
+                'Big-O is mathematically wrong',
+                'Insertion sort is asymptotically faster',
+                'It uses no comparisons',
+            ],
+            'correct': 0,
+            'explanation': (
+                'Asymptotic notation describes large inputs. On small inputs the '
+                'lower overhead of insertion sort can win despite its worse growth.'
+            ),
+        },
+    ],
+    'http-caching-in-practice': [
+        {
+            'prompt': 'What does Cache-Control: max-age=60 mean?',
+            'options': [
+                'The response must be revalidated every 60 seconds',
+                'The response is fresh for 60 seconds',
+                'The response expires after 60 requests',
+                'The cache must delete it after 60 seconds',
+            ],
+            'correct': 1,
+            'explanation': (
+                'max-age sets a freshness lifetime. While the response is fresh, a '
+                'cache may reuse it without contacting the server.'
+            ),
+        },
+        {
+            'prompt': 'What does a 304 Not Modified response tell the browser?',
+            'options': [
+                'The resource was deleted',
+                'The server is unavailable',
+                'The cached copy is still valid and should be reused',
+                'The response body follows in a second request',
+            ],
+            'correct': 2,
+            'explanation': (
+                'A 304 is the server confirming that the cached representation is '
+                'still current, so no new body is sent.'
+            ),
+        },
+        {
+            'prompt': 'What is the difference between no-store and no-cache?',
+            'options': [
+                'no-store never writes the response; no-cache stores it but revalidates before reuse',
+                'no-cache never writes; no-store revalidates',
+                'They are identical',
+                'no-store only applies to CDNs',
+            ],
+            'correct': 0,
+            'explanation': (
+                'no-store forbids writing the response at all, while no-cache allows '
+                'storage but requires validation before every reuse.'
+            ),
+        },
+        {
+            'prompt': 'Which Cache-Control value allows a shared CDN to store the response?',
+            'options': ['private', 'public', 'no-store', 'Set-Cookie'],
+            'correct': 1,
+            'explanation': (
+                'public explicitly permits shared caches, including CDNs, to store '
+                'the response.'
+            ),
+        },
+        {
+            'prompt': 'What does an ETag identify?',
+            'options': [
+                'The server’s IP address',
+                'The user’s session',
+                'A fingerprint of the representation',
+                'The cache’s expiry time',
+            ],
+            'correct': 2,
+            'explanation': (
+                'An ETag is an opaque validator for the selected representation. '
+                'If it still matches, the cached copy is still valid.'
+            ),
+        },
+        {
+            'prompt': 'Which is a correctness bug rather than a performance bug?',
+            'options': [
+                'Caching an authenticated response as public and serving it to another user',
+                'Caching a hashed asset for a year',
+                'Using a short max-age for HTML',
+                'Sending Vary: Accept-Encoding',
+            ],
+            'correct': 0,
+            'explanation': (
+                'A shared cache must never serve one user’s private response to '
+                'another. That is a data leak, not a speed problem.'
+            ),
+        },
+    ],
+    'cap-theorem-in-practice': [
+        {
+            'prompt': 'According to CAP, what must a system choose during a network partition?',
+            'options': [
+                'Consistency or availability',
+                'Latency or throughput',
+                'SQL or NoSQL',
+                'Encryption or compression',
+            ],
+            'correct': 0,
+            'explanation': (
+                'CAP is specifically about the trade-off between consistency and '
+                'availability while the network is partitioned.'
+            ),
+        },
+        {
+            'prompt': 'A CP system usually sacrifices which property during a partition?',
+            'options': ['Partition tolerance', 'Availability', 'Durability', 'Latency'],
+            'correct': 1,
+            'explanation': (
+                'A CP system preserves consistency by refusing requests it cannot '
+                'prove are current, which means giving up availability.'
+            ),
+        },
+        {
+            'prompt': 'An AP system usually sacrifices which property during a partition?',
+            'options': [
+                'Immediate consistency',
+                'Partition tolerance',
+                'Durability',
+                'Availability',
+            ],
+            'correct': 0,
+            'explanation': (
+                'An AP system keeps answering from local replicas, so different '
+                'nodes may temporarily return different values.'
+            ),
+        },
+        {
+            'prompt': 'Why is partition tolerance not optional?',
+            'options': [
+                'Because databases require it',
+                'Because it is the same as consistency',
+                'Because every system must use replication',
+                'Because networks can lose or delay messages',
+            ],
+            'correct': 3,
+            'explanation': (
+                'You cannot make the network reliable. The design question is what '
+                'the system does when a partition happens.'
+            ),
+        },
+        {
+            'prompt': 'What does PACELC add to CAP?',
+            'options': [
+                'A latency-versus-consistency choice when there is no partition',
+                'A third consistency model',
+                'A rule that partitions never happen',
+                'A requirement to use quorums',
+            ],
+            'correct': 0,
+            'explanation': (
+                'PACELC extends CAP with the normal-case trade-off between latency '
+                'and consistency when the network is healthy.'
+            ),
+        },
+    ],
+}
 
 
 class Command(BaseCommand):
@@ -556,6 +1188,9 @@ class Command(BaseCommand):
         self.seed_walkthrough(cats, tags, author)
         for spec in ARTICLES:
             self.seed_article(spec, cats, tags, author)
+
+        self.stdout.write('Seeding quiz questions...')
+        self.seed_quizzes()
 
         self.stdout.write(self.style.SUCCESS('Seed complete.'))
 
@@ -610,6 +1245,33 @@ class Command(BaseCommand):
         for tag_slug in spec['tags']:
             ArticleTag.objects.get_or_create(article=article, tag=tags[tag_slug])
         return article
+
+    def seed_quizzes(self):
+        """Attach the sample questions to articles that exist.
+
+        Idempotent per (article, prompt): a re-seed adds missing questions but
+        never overwrites one an editor has since rewritten. An article that was
+        never seeded, or was renamed, is skipped rather than failing the whole
+        command.
+        """
+        for slug, specs in QUIZ_QUESTIONS.items():
+            article = Article.objects.filter(slug=slug).first()
+            if article is None:
+                continue
+            for spec in specs:
+                options = spec['options']
+                QuizQuestion.objects.get_or_create(
+                    article=article,
+                    prompt=spec['prompt'],
+                    defaults={
+                        'option_a': options[0],
+                        'option_b': options[1],
+                        'option_c': options[2],
+                        'option_d': options[3],
+                        'correct_option': spec['correct'],
+                        'explanation': spec.get('explanation', ''),
+                    },
+                )
 
     def seed_walkthrough(self, cats, tags, author):
         article, created = Article.objects.get_or_create(

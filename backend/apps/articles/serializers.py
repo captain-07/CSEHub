@@ -167,13 +167,16 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()
     reading_time = serializers.SerializerMethodField()
     my_reaction = serializers.SerializerMethodField()
+    # Lets the article page hide the "Quiz me" button when an article has no
+    # questions. One extra query on the detail route, not on the list route.
+    quiz_question_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
         fields = [
             'id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'content', 'category',
             'tags', 'code_snippets', 'author_name', 'author_email', 'reading_time',
-            'like_count', 'dislike_count', 'view_count', 'my_reaction',
+            'like_count', 'dislike_count', 'view_count', 'my_reaction', 'quiz_question_count',
             'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
         read_only_fields = ['like_count', 'dislike_count', 'view_count']
@@ -199,6 +202,10 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
         if not (user and user.is_authenticated):
             return None
         return article.reactions.filter(user=user).values_list('value', flat=True).first()
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_quiz_question_count(self, article):
+        return article.quiz_questions.filter(is_active=True).count()
 
 
 class ArticleReactionSerializer(serializers.ModelSerializer):
@@ -231,6 +238,65 @@ class ViewResultSerializer(serializers.Serializer):
     """
 
     view_count = serializers.IntegerField()
+
+
+class QuizOptionSerializer(serializers.Serializer):
+    """One option as the reader sees it. `id` is the stored option index."""
+
+    id = serializers.IntegerField()
+    text = serializers.CharField()
+
+
+class QuizQuestionPublicSerializer(serializers.Serializer):
+    """A question as the reader receives it.
+
+    It deliberately has no `correct_option` and no `explanation`: the answer key
+    is only sent by the grading response, after the reader has committed to an
+    answer. The options arrive shuffled, so their order carries no signal.
+    """
+
+    id = serializers.IntegerField()
+    prompt = serializers.CharField()
+    options = QuizOptionSerializer(many=True)
+
+
+class QuizPayloadSerializer(serializers.Serializer):
+    """Body of `GET /api/articles/<slug>/quiz/`."""
+
+    questions = QuizQuestionPublicSerializer(many=True)
+    total = serializers.IntegerField()
+
+
+class QuizAnswerSerializer(serializers.Serializer):
+    question_id = serializers.IntegerField()
+    option_id = serializers.IntegerField(min_value=0, max_value=3)
+
+
+class QuizSubmissionSerializer(serializers.Serializer):
+    """Body of `POST /api/articles/<slug>/quiz/submit/`.
+
+    The client sends only the questions it was shown. Each question may appear
+    once, and every id must belong to the article being graded.
+    """
+
+    answers = QuizAnswerSerializer(many=True, allow_empty=False)
+
+
+class QuizAnswerResultSerializer(serializers.Serializer):
+    question_id = serializers.IntegerField()
+    chosen_option_id = serializers.IntegerField()
+    correct_option_id = serializers.IntegerField()
+    is_correct = serializers.BooleanField()
+    explanation = serializers.CharField(allow_blank=True)
+
+
+class QuizResultSerializer(serializers.Serializer):
+    """What `quiz/submit/` returns. Nothing is persisted."""
+
+    score = serializers.IntegerField()
+    total = serializers.IntegerField()
+    percent = serializers.IntegerField()
+    results = QuizAnswerResultSerializer(many=True)
 
 
 class ReactionRequestSerializer(serializers.Serializer):

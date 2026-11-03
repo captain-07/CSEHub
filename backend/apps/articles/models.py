@@ -1,7 +1,8 @@
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Count, F
 from django.db.models.functions import Greatest
-from django.conf import settings
 
 # Create your models here.
 
@@ -147,6 +148,69 @@ class CodeSnippet(models.Model):
 
     class Meta:
         ordering = ['order']
+
+
+class QuizQuestion(models.Model):
+    """One multiple-choice question attached to an article.
+
+    Deliberately stateless: there is no `Quiz` or `QuizAttempt` table, and the
+    API grades a submission without writing anything. A reader may retake a
+    quiz as often as they like, and every request gets a fresh random order.
+
+    Four options are stored as explicit columns rather than a JSON list so the
+    Django admin can edit them as four text boxes and `clean()` can require all
+    four. The admin therefore refuses a question with a blank or duplicate
+    option; a script that bypasses `full_clean()` is on its own.
+
+    `correct_option` is an index into `OPTION_FIELDS` (0..3). The public API
+    never exposes it; only the grading response does, after the answers are in.
+    """
+
+    OPTION_FIELDS = ('option_a', 'option_b', 'option_c', 'option_d')
+    OPTION_CHOICES = [(0, 'A'), (1, 'B'), (2, 'C'), (3, 'D')]
+
+    article = models.ForeignKey(
+        Article,
+        on_delete=models.CASCADE,
+        related_name='quiz_questions',
+    )
+    prompt = models.TextField()
+    option_a = models.CharField(max_length=300)
+    option_b = models.CharField(max_length=300)
+    option_c = models.CharField(max_length=300)
+    option_d = models.CharField(max_length=300)
+    correct_option = models.PositiveSmallIntegerField(choices=OPTION_CHOICES)
+    # Optional feedback shown in the result review. Never sent before grading.
+    explanation = models.TextField(blank=True)
+    # Lets an editor hide a bad question without deleting it.
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+        constraints = [
+            # `choices` is validated by forms, not the database. This pins the
+            # index range so a hand-written row cannot point at a fifth option.
+            models.CheckConstraint(
+                condition=models.Q(correct_option__range=(0, 3)),
+                name='quiz_correct_option_range',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.article_id}: {self.prompt[:60]}'
+
+    def clean(self):
+        super().clean()
+        options = [getattr(self, field) for field in self.OPTION_FIELDS]
+        if any(not (option or '').strip() for option in options):
+            raise ValidationError('All four options are required.')
+        if len({option.strip().casefold() for option in options}) != 4:
+            raise ValidationError('The four options must be distinct.')
+
+    def option_text(self, index):
+        """Text of option `index` (0..3). The API uses the index as the id."""
+        return getattr(self, self.OPTION_FIELDS[index])
 
 
 # Stored verdicts. Module-level rather than nested on ArticleReaction so the
