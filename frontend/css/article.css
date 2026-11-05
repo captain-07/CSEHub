@@ -1009,6 +1009,16 @@
   line-height: 1;
 }
 
+.selection-ai-btn.is-docked {
+  top: auto !important;
+  bottom: 1.5rem;
+  left: 50% !important;
+  transform: translateX(-50%);
+  padding: 0.6rem 1.2rem;
+  font-size: var(--text-sm);
+  box-shadow: 0 8px 30px rgba(var(--shade-rgb), 0.35);
+}
+
 @keyframes popIn {
   from {
     opacity: 0;

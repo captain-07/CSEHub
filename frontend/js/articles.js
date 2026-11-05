@@ -253,7 +253,7 @@ async function renderLibrary(filters, { requestToken, contentArea, filterForm } 
     contentArea.querySelectorAll('[data-remove]').forEach((button) => {
       button.addEventListener('click', () => {
         const key = button.dataset.remove;
-        applyFilters({ search: '', category: '', tag: '', [key]: '' });
+        applyFilters({ [key]: '' });
       });
     });
   } catch (error) {

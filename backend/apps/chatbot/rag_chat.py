@@ -1,7 +1,6 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
-from django.conf import settings
 from .ingestion import get_vectorstore
+from .llm import LLMServiceError, build_llm, response_text
 
 
 class ChatServiceError(Exception):
@@ -41,38 +40,24 @@ SYSTEM_PROMPT = PromptTemplate(
 )
 
 
-def get_llm():
-    if not settings.GEMINI_API_KEY:
-        raise ChatServiceError("The chat service is not configured.")
-    return ChatGoogleGenerativeAI(
-        model=settings.GEMINI_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
-        # `gemini-3.5-flash-lite` fixes its own sampling defaults and ignores
-        # this (it warns at request time); kept for models that honour it.
-        temperature=0.3,
-        timeout=30,
-        max_retries=2,
-    )
+def get_llm(*, temperature=0.3, timeout=30):
+    """Return the assistant's Gemini client.
+
+    Kept as a thin wrapper so existing callers and tests can patch
+    `rag_chat.get_llm` without knowing where client construction lives.
+    """
+    try:
+        return build_llm(temperature=temperature, timeout=timeout)
+    except LLMServiceError as exc:
+        raise ChatServiceError("The chat service is not configured.") from exc
 
 
 def _response_text(response) -> str:
-    """Normalize LangChain/Gemini content without assuming one provider shape."""
-    content = getattr(response, 'content', response)
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get('text'), str):
-                parts.append(item['text'])
-        text = ''.join(parts)
-    else:
-        text = ''
-    if not text.strip():
-        raise ChatServiceError("The chat service returned an empty response.")
-    return text.strip()
+    """Normalise provider content and translate failures to a chat error."""
+    try:
+        return response_text(response)
+    except LLMServiceError as exc:
+        raise ChatServiceError(str(exc)) from exc
 
 
 def answer_question(article, question: str, history: str = '', k: int = 4) -> str:

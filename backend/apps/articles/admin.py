@@ -84,23 +84,37 @@ class ArticleAdmin(admin.ModelAdmin):
 
 @admin.register(QuizQuestion)
 class QuizQuestionAdmin(admin.ModelAdmin):
-    """The authoring surface for the hand-written quiz.
+    """The review and authoring surface for the quiz.
 
-    Questions are written and reviewed here; the article page only ever reads
-    them. `clean()` on the model is what rejects a missing or duplicate option,
-    because the admin form runs `full_clean()`.
+    AI-generated rows arrive inactive, so `source` and `is_active` are the
+    review workflow: filter to AI rows, activate the good ones in bulk. The
+    article page only ever reads active rows. `clean()` on the model rejects a
+    missing or duplicate option, because the admin form runs `full_clean()`.
     """
 
-    list_display = ['prompt', 'article', 'correct_option', 'is_active', 'created_at']
-    list_filter = ['is_active']
+    list_display = ['prompt', 'article', 'source', 'correct_option', 'is_active', 'created_at']
+    list_filter = ['source', 'is_active']
+    list_editable = ['is_active']
     search_fields = ['prompt', 'article__title']
     autocomplete_fields = ['article']
     list_select_related = ['article']
+    readonly_fields = ['ai_model']
+    actions = ['activate_selected', 'deactivate_selected']
     fields = [
         'article', 'prompt',
         'option_a', 'option_b', 'option_c', 'option_d',
-        'correct_option', 'explanation', 'is_active',
+        'correct_option', 'explanation', 'source', 'ai_model', 'is_active',
     ]
+
+    @admin.action(description='Activate selected quiz questions')
+    def activate_selected(self, request, queryset):
+        updated = queryset.update(is_active=True)
+        self.message_user(request, f'Activated {updated} question(s).')
+
+    @admin.action(description='Deactivate selected quiz questions')
+    def deactivate_selected(self, request, queryset):
+        updated = queryset.update(is_active=False)
+        self.message_user(request, f'Deactivated {updated} question(s).')
 
 
 @admin.register(ArticleReaction)

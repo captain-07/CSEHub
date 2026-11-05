@@ -19,7 +19,8 @@ import { initNavbar } from './navbar.js';
 import { initAuth, getAuthState } from './auth-state.js';
 import {
   getArticles, getArticle, getCategories, getTags,
-  createArticle, updateArticle, deleteArticle, reindexArticle,
+  createArticle, updateArticle, deleteArticle, reindexArticle, generateArticleQuiz,
+  getQuizReview, updateQuizQuestion, deleteQuizQuestion,
   createCategory, deleteCategory, createTag, deleteTag,
   uploadImage, normalizePage,
 } from './api/articles.js';
@@ -349,7 +350,7 @@ async function guard() {
 /** Navigation shared by every admin view. */
 function adminNav(active) {
   const link = (hash, label) =>
-    `<a class="admin-nav-link${active === label ? ' is-active' : ''}" href="${hash}"${active === label ? ' aria-current="page"' : ''}>${label}</a>`;
+    `<a class="admin-nav-link${active === label ? ' is-active' : ''}" href="admin.html${hash}"${active === label ? ' aria-current="page"' : ''}>${label}</a>`;
 
   return `
     <nav class="admin-nav" aria-label="Admin sections">
@@ -934,12 +935,12 @@ function articleFormMarkup(article) {
         <div class="admin-editor-workspace">
           <div class="admin-editor-main">
             <div class="title-field-wrap">
-              <label class="sr-only" for="f-title">Article Title</label>
+              <label class="field-label" for="f-title">Article Title<span class="field-required" aria-hidden="true">*</span></label>
               <input class="input admin-editor-title-input" id="f-title" name="title" required value="${escapeHtml(article?.title || '')}" placeholder="Article Title…" autocomplete="off" />
             </div>
 
             <div class="field">
-              <span class="sr-only">Article Content</span>
+              <label class="field-label">Content<span class="field-required" aria-hidden="true">*</span><span class="sr-only">required</span></label>
               <div id="editorjs" class="editor-holder"></div>
             </div>
 
@@ -999,6 +1000,17 @@ function articleFormMarkup(article) {
                 <textarea class="textarea" id="f-excerpt" name="excerpt" rows="3" placeholder="One or two sentences shown on cards and search results.">${escapeHtml(excerpt)}</textarea>
                 <span class="char-count" id="excerpt-char-count">0 characters</span>
               </div>
+            </div>
+
+            <div class="inspector-card">
+              <h3 class="inspector-title">Reader quiz</h3>
+              <p class="field-hint">
+                Review the question bank, edit AI drafts and activate the questions readers
+                should see. Inactive questions stay here but are not served.
+              </p>
+              <button class="button button-secondary button-sm" type="button" id="review-quiz-btn">
+                Review quiz
+              </button>
             </div>
             ` : ''}
 
@@ -1179,6 +1191,9 @@ async function renderArticleForm(id) {
 
     const reindexBtn = document.querySelector('#reindex-btn');
     if (reindexBtn) reindexBtn.addEventListener('click', () => reindex(article));
+
+    const reviewQuizBtn = document.querySelector('#review-quiz-btn');
+    if (reviewQuizBtn) reviewQuizBtn.addEventListener('click', () => openQuizReview(article));
 
     setupArticleFormInteractions(form, article);
   } catch (error) {
@@ -1582,6 +1597,481 @@ async function reindex(article) {
       btn.textContent = 'Update AI index';
     }
   }
+}
+
+/* ------------------------------------------------------------ quiz review */
+
+const QUIZ_OPTION_FIELDS = ['option_a', 'option_b', 'option_c', 'option_d'];
+const QUIZ_OPTION_LETTERS = ['A', 'B', 'C', 'D'];
+
+function setQuizReviewStatus(modal, text, kind = 'info') {
+  const el = modal.querySelector('#quiz-review-status');
+  if (!el) return;
+  el.hidden = !text;
+  el.className = text ? `alert alert-${kind}` : '';
+  el.textContent = text;
+}
+
+function updateQuizReviewSummary(modal, state) {
+  const summary = modal.querySelector('#quiz-review-summary');
+  if (!summary) return;
+  const total = state.questions.length;
+  const active = state.questions.filter((question) => question.is_active).length;
+  summary.textContent = total
+    ? `${total} question${total === 1 ? '' : 's'} in the bank · ${active} active`
+    : 'No questions yet.';
+}
+
+function quizReviewEmptyMarkup() {
+  return `
+    <div class="quiz-review-empty">
+      <p>
+        No questions in this article's bank yet. Generate a set with AI, then review,
+        edit and activate the ones you want readers to see.
+      </p>
+      <button class="button button-primary button-sm" type="button" data-quiz-generate>
+        Generate with AI
+      </button>
+    </div>`;
+}
+
+function quizQuestionCardMarkup(question, index) {
+  const correct = Number(question.correct_option);
+  const options = QUIZ_OPTION_FIELDS.map((field, optionIndex) => {
+    const optionId = `quiz-correct-${question.id}-${optionIndex}`;
+    return `
+      <div class="quiz-review-option">
+        <input
+          id="${optionId}"
+          type="radio"
+          name="quiz-correct-${question.id}"
+          value="${optionIndex}"
+          ${correct === optionIndex ? 'checked' : ''}
+          data-field="correct_option"
+        />
+        <label class="quiz-review-option-letter" for="${optionId}">
+          ${QUIZ_OPTION_LETTERS[optionIndex]}
+        </label>
+        <input
+          class="input"
+          data-field="${field}"
+          value="${escapeHtml(question[field] || '')}"
+          aria-label="Option ${QUIZ_OPTION_LETTERS[optionIndex]} text"
+        />
+      </div>`;
+  }).join('');
+
+  return `
+    <article class="quiz-review-card" data-quiz-card data-question-id="${question.id}">
+      <header class="quiz-review-card-head">
+        <span class="quiz-review-index" data-quiz-index>Q${index + 1}</span>
+        <span class="badge">${question.source === 'ai' ? 'AI-generated' : 'Manual'}</span>
+        <span class="badge ${question.is_active ? 'badge-published' : 'badge-draft'}" data-quiz-status>
+          ${question.is_active ? 'Active' : 'Inactive'}
+        </span>
+        <button class="button button-danger button-sm" type="button" data-quiz-delete>
+          Delete
+        </button>
+      </header>
+
+      <label class="field">
+        <span class="field-label">Question</span>
+        <textarea class="textarea" data-field="prompt" rows="2">${escapeHtml(question.prompt)}</textarea>
+      </label>
+
+      <fieldset class="quiz-review-options">
+        <legend>Options <span class="field-hint">Choose the correct one.</span></legend>
+        ${options}
+      </fieldset>
+
+      <label class="field">
+        <span class="field-label">Explanation</span>
+        <textarea class="textarea" data-field="explanation" rows="2">${escapeHtml(question.explanation || '')}</textarea>
+      </label>
+
+      <div class="quiz-review-card-actions">
+        <button class="button button-primary button-sm" type="button" data-quiz-save>
+          Save changes
+        </button>
+        <button class="button button-secondary button-sm" type="button" data-quiz-toggle>
+          ${question.is_active ? 'Deactivate' : 'Activate'}
+        </button>
+      </div>
+    </article>`;
+}
+
+function renderQuizReviewList(modal, state) {
+  const list = modal.querySelector('#quiz-review-list');
+  if (!list) return;
+  list.innerHTML = state.questions.length
+    ? state.questions.map(quizQuestionCardMarkup).join('')
+    : quizReviewEmptyMarkup();
+  updateQuizReviewSummary(modal, state);
+}
+
+function appendQuizReviewCards(modal, state, questions) {
+  const list = modal.querySelector('#quiz-review-list');
+  if (!list || !questions.length) return;
+  list.querySelector('.quiz-review-empty')?.remove();
+  const start = state.questions.length - questions.length;
+  list.insertAdjacentHTML(
+    'beforeend',
+    questions.map((question, index) => quizQuestionCardMarkup(question, start + index)).join('')
+  );
+}
+
+async function loadQuizReview(modal, state) {
+  const list = modal.querySelector('#quiz-review-list');
+  const summary = modal.querySelector('#quiz-review-summary');
+  state.loading = true;
+  setQuizReviewStatus(modal, '');
+  if (summary) summary.textContent = 'Loading questions…';
+  if (list) list.innerHTML = loadingMarkup('Loading questions…');
+
+  try {
+    const payload = await getQuizReview(state.articleId);
+    if (!document.body.contains(modal)) return;
+    state.questions = Array.isArray(payload?.questions) ? payload.questions : [];
+    renderQuizReviewList(modal, state);
+  } catch (error) {
+    if (!document.body.contains(modal)) return;
+    state.questions = [];
+    if (summary) summary.textContent = 'Unable to load the question bank.';
+    if (list) {
+      list.innerHTML = `
+        <div class="quiz-review-empty">
+          <p>Unable to load the question bank: ${escapeHtml(friendlyError(error))}</p>
+          <button class="button button-secondary button-sm" type="button" data-quiz-retry>
+            Try again
+          </button>
+        </div>`;
+    }
+  } finally {
+    state.loading = false;
+  }
+}
+
+function collectQuizQuestionPayload(card) {
+  const value = (field) => card.querySelector(`[data-field="${field}"]`)?.value.trim() || '';
+  const options = QUIZ_OPTION_FIELDS.map(value);
+  const prompt = value('prompt');
+  const explanation = value('explanation');
+  const selected = card.querySelector('input[data-field="correct_option"]:checked');
+
+  if (!prompt) throw new Error('Enter the question text before saving.');
+  if (options.some((option) => !option)) throw new Error('All four options are required.');
+  if (new Set(options.map((option) => option.toLowerCase())).size !== 4) {
+    throw new Error('The four options must be distinct.');
+  }
+  if (!selected) throw new Error('Mark which option is the correct one.');
+
+  return {
+    prompt,
+    option_a: options[0],
+    option_b: options[1],
+    option_c: options[2],
+    option_d: options[3],
+    correct_option: Number(selected.value),
+    explanation,
+  };
+}
+
+function setQuizCardActiveState(card, question) {
+  const status = card.querySelector('[data-quiz-status]');
+  if (status) {
+    status.textContent = question.is_active ? 'Active' : 'Inactive';
+    status.className = `badge ${question.is_active ? 'badge-published' : 'badge-draft'}`;
+  }
+  const toggle = card.querySelector('[data-quiz-toggle]');
+  if (toggle) toggle.textContent = question.is_active ? 'Deactivate' : 'Activate';
+}
+
+async function saveQuizQuestion(modal, state, card) {
+  const questionId = Number(card.dataset.questionId);
+  let payload;
+  try {
+    payload = collectQuizQuestionPayload(card);
+  } catch (error) {
+    setQuizReviewStatus(modal, error.message, 'error');
+    return;
+  }
+
+  const btn = card.querySelector('[data-quiz-save]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+  }
+  setQuizReviewStatus(modal, 'Saving question…');
+
+  try {
+    const updated = await updateQuizQuestion(state.articleId, questionId, payload);
+    const index = state.questions.findIndex((question) => question.id === questionId);
+    if (index !== -1) state.questions[index] = { ...state.questions[index], ...updated };
+    setQuizCardActiveState(card, updated);
+    updateQuizReviewSummary(modal, state);
+    setQuizReviewStatus(
+      modal,
+      updated.is_active
+        ? 'Question saved.'
+        : 'Question saved. Activate it when it is ready for readers.',
+      'success'
+    );
+  } catch (error) {
+    setQuizReviewStatus(modal, `Unable to save the question: ${friendlyError(error)}`, 'error');
+  } finally {
+    if (document.body.contains(btn)) {
+      btn.disabled = false;
+      btn.textContent = 'Save changes';
+    }
+  }
+}
+
+async function toggleQuizQuestion(modal, state, card) {
+  const questionId = Number(card.dataset.questionId);
+  const current = state.questions.find((question) => question.id === questionId);
+  if (!current) return;
+
+  const nextActive = !current.is_active;
+  // Activating is a commitment, so it also saves any edits on the card. Without
+  // this an editor could fix a typo, press Activate, and publish the old text.
+  let payload = { is_active: nextActive };
+  if (nextActive) {
+    try {
+      payload = { ...collectQuizQuestionPayload(card), is_active: true };
+    } catch (error) {
+      setQuizReviewStatus(modal, error.message, 'error');
+      return;
+    }
+  }
+
+  const btn = card.querySelector('[data-quiz-toggle]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = nextActive ? 'Activating…' : 'Deactivating…';
+  }
+  setQuizReviewStatus(
+    modal,
+    nextActive ? 'Activating question…' : 'Deactivating question…'
+  );
+
+  try {
+    const updated = await updateQuizQuestion(state.articleId, questionId, payload);
+    const index = state.questions.findIndex((question) => question.id === questionId);
+    if (index !== -1) state.questions[index] = { ...current, ...updated };
+    setQuizCardActiveState(card, updated);
+    updateQuizReviewSummary(modal, state);
+    setQuizReviewStatus(
+      modal,
+      updated.is_active
+        ? 'Question activated. Readers can now be served it.'
+        : 'Question deactivated. It stays in the bank but is not served.',
+      'success'
+    );
+  } catch (error) {
+    setQuizReviewStatus(
+      modal,
+      `Unable to ${nextActive ? 'activate' : 'deactivate'} the question: ${friendlyError(error)}`,
+      'error'
+    );
+  } finally {
+    if (document.body.contains(btn)) {
+      const latest = state.questions.find((question) => question.id === questionId) || current;
+      btn.disabled = false;
+      btn.textContent = latest.is_active ? 'Deactivate' : 'Activate';
+    }
+  }
+}
+
+async function deleteQuizQuestionFromReview(modal, state, card) {
+  const questionId = Number(card.dataset.questionId);
+  const question = state.questions.find((row) => row.id === questionId);
+  if (!question) return;
+
+  const confirmed = await confirmAction({
+    title: 'Delete this question?',
+    message: "This removes it from the article's question bank. This cannot be undone.",
+    confirmLabel: 'Delete question',
+    destructive: true,
+  });
+  if (!confirmed) return;
+
+  const btn = card.querySelector('[data-quiz-delete]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+  }
+  setQuizReviewStatus(modal, 'Deleting question…');
+
+  try {
+    await deleteQuizQuestion(state.articleId, questionId);
+    state.questions = state.questions.filter((row) => row.id !== questionId);
+    card.remove();
+
+    const list = modal.querySelector('#quiz-review-list');
+    if (list && !state.questions.length) list.innerHTML = quizReviewEmptyMarkup();
+    modal.querySelectorAll('[data-quiz-card]').forEach((row, index) => {
+      const label = row.querySelector('[data-quiz-index]');
+      if (label) label.textContent = `Q${index + 1}`;
+    });
+
+    updateQuizReviewSummary(modal, state);
+    setQuizReviewStatus(modal, 'Question deleted.', 'success');
+  } catch (error) {
+    setQuizReviewStatus(modal, `Unable to delete the question: ${friendlyError(error)}`, 'error');
+    if (document.body.contains(btn)) {
+      btn.disabled = false;
+      btn.textContent = 'Delete';
+    }
+  }
+}
+
+async function generateQuizFromReview(modal, state) {
+  if (state.loading) {
+    setQuizReviewStatus(modal, 'Wait for the question bank to finish loading.', 'info');
+    return;
+  }
+  if (state.generating) return;
+  if (isDirty()) {
+    setQuizReviewStatus(
+      modal,
+      'Save the article before generating a quiz so the generator sees your latest text.',
+      'error'
+    );
+    return;
+  }
+
+  state.generating = true;
+  const buttons = [...modal.querySelectorAll('[data-quiz-generate]')];
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
+  });
+  setQuizReviewStatus(
+    modal,
+    'Generating quiz questions with AI. This can take up to 30 seconds…'
+  );
+
+  try {
+    const result = await generateArticleQuiz(state.articleId);
+    const created = Array.isArray(result?.questions) ? result.questions : [];
+    const known = new Set(state.questions.map((question) => question.id));
+    const additions = created.filter((question) => !known.has(question.id));
+    const hadQuestions = state.questions.length > 0;
+
+    if (additions.length) {
+      state.questions.push(...additions);
+      if (hadQuestions) appendQuizReviewCards(modal, state, additions);
+      else renderQuizReviewList(modal, state);
+    }
+
+    const rejected = Number(result?.rejected) || 0;
+    const generated = additions.length === 1
+      ? '1 question generated'
+      : `${additions.length} questions generated`;
+    const dropped = rejected ? `; ${rejected} rejected by validation` : '';
+    setQuizReviewStatus(
+      modal,
+      `${generated}${dropped}. Review and activate the questions you want readers to see.`,
+      rejected ? 'info' : 'success'
+    );
+    updateQuizReviewSummary(modal, state);
+  } catch (error) {
+    setQuizReviewStatus(modal, `Unable to generate questions: ${friendlyError(error)}`, 'error');
+  } finally {
+    state.generating = false;
+    if (document.body.contains(modal)) {
+      buttons.forEach((btn) => {
+        if (document.body.contains(btn)) {
+          btn.disabled = false;
+          btn.textContent = 'Generate with AI';
+        }
+      });
+    }
+  }
+}
+
+async function openQuizReview(article) {
+  document.querySelector('#quiz-review-modal')?.remove();
+
+  const opener = document.activeElement;
+  const modal = document.createElement('div');
+  modal.id = 'quiz-review-modal';
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal modal-quiz-review" role="dialog" aria-modal="true" aria-labelledby="quiz-review-title">
+      <header class="modal-head">
+        <div>
+          <p class="eyebrow">Reader quiz</p>
+          <h2 id="quiz-review-title">Review questions</h2>
+          <p class="field-hint" id="quiz-review-summary">Loading questions…</p>
+          <p id="quiz-review-status" role="status" aria-live="polite" hidden></p>
+        </div>
+        <div class="quiz-review-toolbar">
+          <button class="button button-secondary button-sm" type="button" data-quiz-generate>
+            Generate with AI
+          </button>
+          <button class="button button-secondary button-sm" type="button" data-quiz-close>
+            Close
+          </button>
+        </div>
+      </header>
+      <div class="modal-body">
+        <div id="quiz-review-list" class="quiz-review-list">
+          ${loadingMarkup('Loading questions…')}
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  document.body.style.overflow = 'hidden';
+
+  const state = {
+    articleId: article.id,
+    questions: [],
+    loading: true,
+    generating: false,
+  };
+
+  const close = () => {
+    modal.remove();
+    document.removeEventListener('keydown', onKey);
+    // A preview or confirmation may still be open behind this dialog.
+    if (!document.querySelector('.modal-backdrop')) document.body.style.overflow = '';
+    opener?.focus?.();
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape') close();
+    if (event.key === 'Tab') trapFocus(modal, event);
+  };
+
+  modal.addEventListener('click', async (event) => {
+    if (event.target === modal || event.target.closest('[data-quiz-close]')) {
+      close();
+      return;
+    }
+    if (event.target.closest('[data-quiz-generate]')) {
+      await generateQuizFromReview(modal, state);
+      return;
+    }
+    if (event.target.closest('[data-quiz-retry]')) {
+      await loadQuizReview(modal, state);
+      return;
+    }
+
+    const card = event.target.closest('[data-quiz-card]');
+    if (!card) return;
+    if (event.target.closest('[data-quiz-save]')) {
+      await saveQuizQuestion(modal, state, card);
+    } else if (event.target.closest('[data-quiz-toggle]')) {
+      await toggleQuizQuestion(modal, state, card);
+    } else if (event.target.closest('[data-quiz-delete]')) {
+      await deleteQuizQuestionFromReview(modal, state, card);
+    }
+  });
+
+  document.addEventListener('keydown', onKey);
+  await loadQuizReview(modal, state);
+  modal.querySelector('[data-quiz-close]')?.focus();
 }
 
 /* ------------------------------------------------------------- preview */

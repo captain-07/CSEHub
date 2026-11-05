@@ -86,6 +86,21 @@ export function reindexArticle(id) {
   return apiFetch(`/articles/${encodeURIComponent(id)}/reindex/`, { method: 'POST' });
 }
 
+/**
+ * Asks the backend to draft quiz questions from the saved article.
+ *
+ * Generation is slower than an ordinary API call because it waits on Gemini,
+ * so it gets a 60-second ceiling. The backend stores the drafts inactive unless
+ * `activate` is explicitly true, and `replace` removes only AI-generated rows.
+ */
+export function generateArticleQuiz(id, { count = 5, replace = false, activate = false } = {}) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/quiz/generate/`, {
+    method: 'POST',
+    body: { count, replace, activate },
+    timeout: 60_000,
+  });
+}
+
 /* ---------------------------------------------------------------- reactions */
 
 /**
@@ -148,6 +163,33 @@ export function submitArticleQuiz(id, answers) {
     method: 'POST',
     body: { answers },
   });
+}
+
+/**
+ * Fetches the editor-side question bank, inactive drafts and answer keys
+ * included.
+ *
+ * Admin-only on the backend and author-scoped, because this is the one quiz
+ * response that carries `correct_option` before a reader has answered.
+ */
+export function getQuizReview(id) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/quiz/review/`);
+}
+
+/** Edits one question in the review panel. */
+export function updateQuizQuestion(id, questionId, payload) {
+  return apiFetch(
+    `/articles/${encodeURIComponent(id)}/quiz/review/${encodeURIComponent(questionId)}/`,
+    { method: 'PATCH', body: payload },
+  );
+}
+
+/** Removes one question from an article's bank. */
+export function deleteQuizQuestion(id, questionId) {
+  return apiFetch(
+    `/articles/${encodeURIComponent(id)}/quiz/review/${encodeURIComponent(questionId)}/`,
+    { method: 'DELETE' },
+  );
 }
 
 /**

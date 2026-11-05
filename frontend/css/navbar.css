@@ -208,8 +208,24 @@
   }
 }
 
+body.nav-open {
+  overflow: hidden;
+}
+
 @media (max-width: 768px) {
+  .brand {
+    order: 1;
+  }
+
+  .theme-toggle {
+    order: 2;
+    margin-left: auto;
+    width: 40px;
+    height: 40px;
+  }
+
   .mobile-nav-toggle {
+    order: 3;
     display: grid;
     place-items: center;
     /* A 24px glyph is not a 24px target; the button needs the size, not the
@@ -219,9 +235,8 @@
     margin: -0.35rem -0.5rem -0.35rem 0;
   }
 
-  .theme-toggle {
-    width: 40px;
-    height: 40px;
+  nav {
+    order: 4;
   }
 
   .nav-menu {

@@ -14,13 +14,16 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django_filters.rest_framework.filterset import BooleanFilter, FilterSet
 from apps.chatbot.ingestion import ingest_article
 from .models import Category, Tag, Article, ArticleReaction, REACTION_NONE
-from .permissions import IsAuthorOrReadOnly
+from .permissions import IsArticleAuthorOrSuperuser, IsAuthorOrReadOnly
 from .serializers import (
     CategorySerializer, TagSerializer,
     ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer,
     ReactionRequestSerializer, ReactionResultSerializer, ViewResultSerializer,
     QuizPayloadSerializer, QuizResultSerializer, QuizSubmissionSerializer,
+    QuizGenerationRequestSerializer, QuizGenerationResultSerializer,
+    QuizQuestionAdminSerializer, QuizReviewPayloadSerializer,
 )
+from .quiz_ai import QuizGenerationError, generate_quiz_questions
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +122,9 @@ class ArticleFilterSet(FilterSet):
 
 
 class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
-    ADMIN_ACTIONS = AdminWriteOrReadAnyMixin.ADMIN_ACTIONS + ('reindex',)
+    ADMIN_ACTIONS = AdminWriteOrReadAnyMixin.ADMIN_ACTIONS + (
+        'reindex', 'generate_quiz', 'quiz_review', 'quiz_review_question',
+    )
     # Opt in to the author check, since the mixin is also used by Category and
     # Tag, which have no `author` to compare against.
     author_scoped_writes = True
@@ -129,6 +134,9 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     # reaction is. Naming the action here is therefore the only way to get past
     # it; a `permission_classes` on the `@action` would be silently ignored.
     AUTHENTICATED_ACTIONS = ('react',)
+    # These actions return answer keys, so their *reads* have to be author
+    # scoped too. `IsAuthorOrReadOnly` would wave any GET through.
+    REVIEW_ACTIONS = ('quiz_review', 'quiz_review_question')
     queryset = Article.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     # `is_published` is exposed so the admin list can filter by status. It is safe
@@ -152,6 +160,8 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         # See AUTHENTICATED_ACTIONS. Everything else defers to the mixin.
         if self.action in self.AUTHENTICATED_ACTIONS:
             return [IsAuthenticated()]
+        if self.action in self.REVIEW_ACTIONS:
+            return [IsAdminUser(), IsArticleAuthorOrSuperuser()]
         return super().get_permissions()
 
     def _is_admin_listing(self):
@@ -417,6 +427,114 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
             'percent': round(score * 100 / total) if total else 0,
             'results': results,
         })
+
+    @extend_schema(
+        request=QuizGenerationRequestSerializer,
+        responses={201: QuizGenerationResultSerializer},
+        summary='Generate quiz questions for an article',
+        description=(
+            'Asks the configured Gemini model for multiple-choice questions and '
+            'stores the valid drafts. Generated rows are inactive by default so '
+            'an editor can review them; `activate=true` is explicit. `replace=true` '
+            'deletes only earlier AI-generated questions and never hand-written '
+            'ones. Generation is an editor action, not part of a reader request.'
+        ),
+    )
+    @action(detail=True, methods=['post'], url_path='quiz/generate')
+    def generate_quiz(self, request, slug=None, **kwargs):
+        """Generate questions for this article and add them to its bank.
+
+        Admin-only: the mixin's `ADMIN_ACTIONS` is the single source of truth
+        here, so the action is listed there rather than carrying a
+        `permission_classes` that `get_permissions` would ignore.
+        """
+        article = self.get_object()
+
+        serializer = QuizGenerationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        options = serializer.validated_data
+
+        try:
+            created, rejected = generate_quiz_questions(
+                article,
+                options['count'],
+                replace_ai=options['replace'],
+                activate=options['activate'],
+            )
+        except QuizGenerationError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=exc.status_code,
+            )
+        except Exception:
+            logger.exception('Quiz generation failed for article %s', article.pk)
+            return Response(
+                {'detail': 'Quiz generation failed unexpectedly. Try again later.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        payload = {
+            'created': len(created),
+            'rejected': rejected,
+            'active_count': article.quiz_questions.filter(is_active=True).count(),
+            'questions': created,
+        }
+        return Response(
+            QuizGenerationResultSerializer(payload).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(responses={200: QuizReviewPayloadSerializer})
+    @action(detail=True, methods=['get'], url_path='quiz/review')
+    def quiz_review(self, request, slug=None, **kwargs):
+        """List every quiz question for this article, answer key included.
+
+        This is the editor-side counterpart to the public `quiz` action. It is
+        deliberately admin-only and returns inactive drafts too: the point of
+        the custom editor panel is to review AI output without opening Django
+        admin, which ordinary editors cannot do.
+        """
+        article = self.get_object()
+        questions = list(article.quiz_questions.all())
+        payload = {
+            'questions': questions,
+            'total': len(questions),
+            'active_count': sum(1 for question in questions if question.is_active),
+        }
+        return Response(QuizReviewPayloadSerializer(payload).data)
+
+    @extend_schema(
+        request=QuizQuestionAdminSerializer,
+        responses={200: QuizQuestionAdminSerializer, 204: None},
+    )
+    @action(
+        detail=True,
+        methods=['patch', 'delete'],
+        url_path=r'quiz/review/(?P<question_id>\d+)',
+    )
+    def quiz_review_question(self, request, slug=None, question_id=None, **kwargs):
+        """Edit or delete one question in this article's bank.
+
+        The question id is scoped through `article.quiz_questions`, so another
+        article's question cannot be reached by changing the id in the URL.
+        """
+        article = self.get_object()
+        question = article.quiz_questions.filter(pk=question_id).first()
+        if question is None:
+            raise Http404('No quiz question found for this article.')
+
+        if request.method == 'DELETE':
+            question.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        serializer = QuizQuestionAdminSerializer(
+            question,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def reindex(self, request, slug=None, **kwargs):

@@ -1,6 +1,26 @@
 from rest_framework import permissions
 
 
+class IsArticleAuthorOrSuperuser(permissions.BasePermission):
+    """Staff-only access to an article's editor-only quiz data.
+
+    `IsAuthorOrReadOnly` deliberately lets every reader read an article, so it
+    cannot protect an action that returns the answer key. This permission is
+    for those actions: the caller must be staff, and must be the author (or a
+    superuser). Unowned articles stay reachable for the same reason writes do.
+    """
+
+    message = 'You can only review articles you authored.'
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if not (user and user.is_authenticated and user.is_staff):
+            return False
+        if user.is_superuser:
+            return True
+        return obj.author_id is None or obj.author_id == user.pk
+
+
 class IsAuthorOrReadOnly(permissions.BasePermission):
     """Write access is limited to the article's author.
 

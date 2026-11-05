@@ -339,18 +339,26 @@ function initSelectionAi(shell, article) {
     const btnWidth = btn.offsetWidth || 96;
     const btnHeight = btn.offsetHeight || 32;
 
-    // Position above selection if there's room, otherwise below
-    const top = rect.top - btnHeight - 10 > 70
-      ? rect.top - btnHeight - 10
-      : rect.bottom + 10;
+    const isTouch = window.matchMedia('(pointer: coarse)').matches;
+    if (isTouch) {
+      btn.classList.add('is-docked');
+      btn.style.top = '';
+      btn.style.left = '';
+    } else {
+      btn.classList.remove('is-docked');
+      // Position above selection if there's room, otherwise below
+      const top = rect.top - btnHeight - 10 > 70
+        ? rect.top - btnHeight - 10
+        : rect.bottom + 10;
 
-    const left = Math.max(16, Math.min(
-      window.innerWidth - btnWidth - 16,
-      rect.left + (rect.width / 2) - (btnWidth / 2)
-    ));
+      const left = Math.max(16, Math.min(
+        window.innerWidth - btnWidth - 16,
+        rect.left + (rect.width / 2) - (btnWidth / 2)
+      ));
 
-    btn.style.top = `${Math.round(top)}px`;
-    btn.style.left = `${Math.round(left)}px`;
+      btn.style.top = `${Math.round(top)}px`;
+      btn.style.left = `${Math.round(left)}px`;
+    }
   };
 
   btn.addEventListener('mousedown', (event) => {

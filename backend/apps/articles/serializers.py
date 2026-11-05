@@ -2,14 +2,16 @@ import re
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema_field
 
 from .models import (
-    Category, Tag, Article, ArticleReaction, CodeSnippet, SUPPORTED_BLOCK_TYPES,
-    REACTION_LIKE, REACTION_DISLIKE, REACTION_NONE,
+    Category, Tag, Article, ArticleReaction, CodeSnippet, QuizQuestion,
+    SUPPORTED_BLOCK_TYPES, REACTION_LIKE, REACTION_DISLIKE, REACTION_NONE,
 )
+from .quiz_ai import DEFAULT_QUESTION_COUNT, MAX_QUESTIONS_PER_REQUEST
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -297,6 +299,78 @@ class QuizResultSerializer(serializers.Serializer):
     total = serializers.IntegerField()
     percent = serializers.IntegerField()
     results = QuizAnswerResultSerializer(many=True)
+
+
+class QuizGenerationRequestSerializer(serializers.Serializer):
+    """Body of `POST /api/articles/<slug>/quiz/generate/`.
+
+    `replace` removes only AI-generated rows; hand-written questions are never
+    touched. `activate` is explicit because the default is to leave drafts
+    inactive for review.
+    """
+
+    count = serializers.IntegerField(
+        min_value=1,
+        max_value=MAX_QUESTIONS_PER_REQUEST,
+        default=DEFAULT_QUESTION_COUNT,
+    )
+    replace = serializers.BooleanField(default=False)
+    activate = serializers.BooleanField(default=False)
+
+
+class QuizQuestionAdminSerializer(serializers.ModelSerializer):
+    """A quiz question including its answer key, for the editor only.
+
+    This serializer is also the write shape for the review panel. `source` and
+    `ai_model` are read-only because they record provenance, not editorial
+    intent: an editor may rewrite an AI draft, but must not be able to pass it
+    off as hand-written or forge the model id.
+    """
+
+    class Meta:
+        model = QuizQuestion
+        fields = [
+            'id', 'prompt', 'option_a', 'option_b', 'option_c', 'option_d',
+            'correct_option', 'explanation', 'source', 'ai_model', 'is_active',
+        ]
+        read_only_fields = ['id', 'source', 'ai_model']
+
+    def update(self, instance, validated_data):
+        # `ModelSerializer` validates field types but never calls the model's
+        # `clean()`. Without this, a PATCH could make two options identical even
+        # though the Django admin and the AI generator both reject that.
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                getattr(exc, 'message_dict', None) or exc.messages
+            )
+        instance.save()
+        return instance
+
+
+class QuizReviewPayloadSerializer(serializers.Serializer):
+    """What `quiz/review/` returns: every row, including inactive drafts."""
+
+    questions = QuizQuestionAdminSerializer(many=True)
+    total = serializers.IntegerField()
+    active_count = serializers.IntegerField()
+
+
+class QuizGenerationResultSerializer(serializers.Serializer):
+    """What `quiz/generate/` returns.
+
+    `active_count` lets the editor see whether the reader-facing quiz actually
+    exists yet; generated rows are inactive by default, so `created` alone
+    would look like the quiz is live when it is not.
+    """
+
+    created = serializers.IntegerField()
+    rejected = serializers.IntegerField()
+    active_count = serializers.IntegerField()
+    questions = QuizQuestionAdminSerializer(many=True)
 
 
 class ReactionRequestSerializer(serializers.Serializer):

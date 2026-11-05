@@ -21,8 +21,9 @@ cloudinary==1.44.0
 django-cloudinary-storage==0.3.0
 Pillow==12.1.0
 
-# RAG chat
+# RAG chat and structured AI output
 pinecone==7.3.0
+pydantic==2.12.5
 langchain-core==1.6.0
 langchain-google-genai==4.3.5
 langchain-pinecone==0.2.13

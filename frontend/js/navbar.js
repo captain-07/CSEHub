@@ -59,7 +59,7 @@ export function initNavbar() {
       <a class="brand" href="index.html">
         <img class="brand-logo" src="logo.svg" alt="CSEHub" width="1939" height="811" />
       </a>
-      <button class="mobile-nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="nav-menu">☰</button>
+      <button class="mobile-nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-haspopup="true" aria-controls="nav-menu">☰</button>
       <nav aria-label="Primary navigation">
         <ul class="nav-menu" id="nav-menu"></ul>
       </nav>
@@ -72,15 +72,18 @@ export function initNavbar() {
   // single open/close state, so its bookkeeping lives in one place.
   const closeMenu = () => {
     menu.classList.remove('active');
+    document.body.classList.remove('nav-open');
     toggle.setAttribute('aria-expanded', 'false');
     toggle.textContent = '☰';
   };
 
   toggle.addEventListener('click', () => {
     const expanded = toggle.getAttribute('aria-expanded') === 'true';
-    toggle.setAttribute('aria-expanded', String(!expanded));
-    toggle.textContent = expanded ? '☰' : '✕';
-    menu.classList.toggle('active');
+    const nextState = !expanded;
+    toggle.setAttribute('aria-expanded', String(nextState));
+    toggle.textContent = nextState ? '✕' : '☰';
+    menu.classList.toggle('active', nextState);
+    document.body.classList.toggle('nav-open', nextState);
   });
 
   // Click outside the open menu dismisses it — expected behaviour for an
@@ -94,9 +97,28 @@ export function initNavbar() {
   // Escape closes the menu and hands focus back to the control that opened it,
   // instead of leaving the keyboard user stranded after the menu disappears.
   document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || !menu.classList.contains('active')) return;
-    closeMenu();
-    toggle.focus();
+    if (event.key === 'Escape' && menu.classList.contains('active')) {
+      closeMenu();
+      toggle.focus();
+      return;
+    }
+
+    // Focus trap inside open mobile menu
+    if (event.key === 'Tab' && menu.classList.contains('active')) {
+      const focusable = [toggle, ...menu.querySelectorAll('a, button, input')].filter(
+        (el) => !el.disabled && el.offsetParent !== null
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
   });
 
   // Close the mobile menu after following a link inside it.

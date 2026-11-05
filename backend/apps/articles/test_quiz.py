@@ -1,5 +1,6 @@
 from io import StringIO
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
@@ -270,6 +271,237 @@ class QuizAPITests(APITestCase):
         row = self.client.get('/api/articles/').data['results'][0]
 
         self.assertNotIn('quiz_question_count', row)
+
+
+class QuizReviewAPITests(APITestCase):
+    """The editor-panel review surface.
+
+    Ordinary editors authenticate through Supabase and have no usable Django
+    admin login, so reviewing an AI draft has to be part of the custom admin.
+    These tests pin the two properties that makes safe: every route is
+    author-scoped, and an edit still obeys the model's four-distinct-options
+    rule instead of bypassing `clean()`.
+    """
+
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            email='staff@example.com',
+            username='staff',
+            password='password',
+            is_staff=True,
+        )
+        self.other_staff = get_user_model().objects.create_user(
+            email='other@example.com',
+            username='other',
+            password='password',
+            is_staff=True,
+        )
+        self.reader = get_user_model().objects.create_user(
+            email='reader@example.com',
+            username='reader',
+            password='password',
+        )
+        self.article = Article.objects.create(
+            title='Public',
+            slug='public',
+            content={'blocks': []},
+            is_published=True,
+            author=self.staff,
+        )
+        self.other_article = Article.objects.create(
+            title='Other',
+            slug='other',
+            content={'blocks': []},
+            is_published=True,
+            author=self.other_staff,
+        )
+
+    def make_question(self, article=None, **overrides):
+        values = {
+            'article': article or self.article,
+            'prompt': 'Which option is correct?',
+            'option_a': 'Alpha',
+            'option_b': 'Bravo',
+            'option_c': 'Charlie',
+            'option_d': 'Delta',
+            'correct_option': 1,
+            'explanation': 'Bravo is the correct one.',
+        }
+        values.update(overrides)
+        return QuizQuestion.objects.create(**values)
+
+    def review_url(self, article=None):
+        article = article or self.article
+        return f'/api/articles/{article.slug}/quiz/review/'
+
+    def question_url(self, question, article=None):
+        article = article or self.article
+        return f'/api/articles/{article.slug}/quiz/review/{question.pk}/'
+
+    # --- permissions -------------------------------------------------------
+
+    def test_review_is_admin_only_and_author_scoped(self):
+        self.assertEqual(self.client.get(self.review_url()).status_code, 401)
+
+        self.client.force_authenticate(self.reader)
+        self.assertEqual(self.client.get(self.review_url()).status_code, 403)
+
+        self.client.force_authenticate(self.other_staff)
+        self.assertEqual(self.client.get(self.review_url()).status_code, 403)
+
+        self.client.force_authenticate(self.staff)
+        self.assertEqual(self.client.get(self.review_url()).status_code, 200)
+
+    def test_question_edit_and_delete_are_author_scoped(self):
+        question = self.make_question()
+
+        self.client.force_authenticate(self.other_staff)
+        self.assertEqual(
+            self.client.patch(
+                self.question_url(question), {'prompt': 'Hijacked'}, format='json'
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.delete(self.question_url(question)).status_code,
+            403,
+        )
+        question.refresh_from_db()
+        self.assertEqual(question.prompt, 'Which option is correct?')
+
+    # --- listing -----------------------------------------------------------
+
+    def test_review_accepts_the_numeric_article_id_used_by_the_admin(self):
+        self.make_question()
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.get(f'/api/articles/{self.article.pk}/quiz/review/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total'], 1)
+
+    def test_review_returns_all_questions_and_the_answer_key(self):
+        active = self.make_question(prompt='Active', source=QuizQuestion.SOURCE_AI)
+        self.make_question(prompt='Draft', is_active=False)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.get(self.review_url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total'], 2)
+        self.assertEqual(response.data['active_count'], 1)
+        rows = {row['prompt']: row for row in response.data['questions']}
+        self.assertEqual(rows['Active']['correct_option'], active.correct_option)
+        self.assertEqual(rows['Active']['source'], QuizQuestion.SOURCE_AI)
+        self.assertFalse(rows['Draft']['is_active'])
+
+    # --- editing -----------------------------------------------------------
+
+    def test_review_patch_edits_and_activates_a_question(self):
+        question = self.make_question(is_active=False)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            self.question_url(question),
+            {
+                'prompt': 'Which is O(1) on average?',
+                'option_a': 'Hash map lookup',
+                'option_b': 'Linear search',
+                'option_c': 'Bubble sort',
+                'option_d': 'Depth-first search',
+                'correct_option': 0,
+                'explanation': 'A hash map has average O(1) lookup.',
+                'is_active': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        question.refresh_from_db()
+        self.assertEqual(question.prompt, 'Which is O(1) on average?')
+        self.assertEqual(question.correct_option, 0)
+        self.assertTrue(question.is_active)
+
+        # Activation is what moves a reviewed question into the reader bank.
+        public = self.client.get(f'/api/articles/{self.article.slug}/quiz/')
+        self.assertEqual(public.data['total'], 1)
+
+    def test_review_patch_rejects_duplicate_options(self):
+        question = self.make_question()
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            self.question_url(question),
+            {'option_b': 'Alpha'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        question.refresh_from_db()
+        self.assertEqual(question.option_b, 'Bravo')
+
+    def test_review_patch_cannot_rewrite_provenance(self):
+        question = self.make_question(
+            source=QuizQuestion.SOURCE_AI,
+            ai_model='gemini-test-model',
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            self.question_url(question),
+            {
+                'prompt': 'Edited prompt?',
+                'source': QuizQuestion.SOURCE_MANUAL,
+                'ai_model': 'forged-model',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        question.refresh_from_db()
+        self.assertEqual(question.prompt, 'Edited prompt?')
+        self.assertEqual(question.source, QuizQuestion.SOURCE_AI)
+        self.assertEqual(question.ai_model, 'gemini-test-model')
+
+    def test_review_patch_rejects_an_out_of_range_answer(self):
+        question = self.make_question()
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            self.question_url(question),
+            {'correct_option': 4},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_review_cannot_touch_another_articles_question(self):
+        question = self.make_question(article=self.other_article)
+        self.client.force_authenticate(self.staff)
+
+        self.assertEqual(
+            self.client.patch(
+                self.question_url(question), {'prompt': 'Hijacked'}, format='json'
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.delete(self.question_url(question)).status_code,
+            404,
+        )
+
+    # --- deleting ----------------------------------------------------------
+
+    def test_review_delete_removes_only_the_chosen_question(self):
+        doomed = self.make_question(prompt='Doomed')
+        kept = self.make_question(prompt='Kept')
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.delete(self.question_url(doomed))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(QuizQuestion.objects.filter(pk=doomed.pk).exists())
+        self.assertTrue(QuizQuestion.objects.filter(pk=kept.pk).exists())
 
 
 class QuizQuestionModelTests(TestCase):
