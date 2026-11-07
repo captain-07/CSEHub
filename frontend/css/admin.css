@@ -347,8 +347,17 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.15); }
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.5;
+    transform: scale(1.15);
+  }
 }
 
 /* Draft Recovery Alert */
@@ -1328,6 +1337,7 @@
 }
 
 @media (max-width: 768px) {
+
   .admin-heading,
   .admin-toolbar,
   .admin-inline-form,

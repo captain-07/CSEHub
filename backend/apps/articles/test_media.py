@@ -3,6 +3,7 @@
 import io
 import tempfile
 from unittest.mock import patch
+from urllib.parse import urljoin
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -224,9 +225,22 @@ class PublicUrlTests(SimpleTestCase):
     """`_public_url` must handle both storage shapes without mangling either."""
 
     class FakeRequest:
-        @staticmethod
-        def build_absolute_uri(path):
-            return f'https://api.example.com/{path.lstrip("/")}'
+        """Mirrors how Django's `build_absolute_uri` actually joins a location.
+
+        A root-relative location replaces the request path; a bare relative one
+        is joined *underneath* the request path. That distinction is the whole
+        bug this class guards: the upload endpoint's own path is
+        `/api/uploads/images/`, so `media/articles/x.webp` used to become
+        `/api/uploads/images/media/articles/x.webp`.
+        """
+
+        path = '/api/uploads/images/'
+
+        @classmethod
+        def build_absolute_uri(cls, location):
+            if location.startswith('//'):
+                return f'https:{location}'
+            return urljoin(f'https://api.example.com{cls.path}', location)
 
     def _url_for(self, stored_url):
         """Resolve `_public_url` against a stub storage returning `stored_url`.
@@ -246,10 +260,22 @@ class PublicUrlTests(SimpleTestCase):
 
     @override_settings(API_PUBLIC_BASE_URL='')
     def test_local_filesystem_relative_path_becomes_absolute(self):
-        self.assertEqual(
-            self._url_for('/media/articles/x.webp'),
-            'https://api.example.com/media/articles/x.webp',
-        )
+        """Regression guard: a root-relative path must replace the request path.
+
+        Passing the stripped path through made Django join it under the upload
+        endpoint, producing a 404 URL like
+        `https://api.example.com/api/uploads/images/media/articles/x.webp`.
+        """
+        url = self._url_for('/media/articles/x.webp')
+        self.assertEqual(url, 'https://api.example.com/media/articles/x.webp')
+        self.assertNotIn('/api/uploads/images/', url)
+
+    @override_settings(API_PUBLIC_BASE_URL='')
+    def test_bare_relative_storage_path_is_also_rooted(self):
+        """Some storage backends omit the leading slash; it must not matter."""
+        url = self._url_for('media/articles/x.webp')
+        self.assertEqual(url, 'https://api.example.com/media/articles/x.webp')
+        self.assertNotIn('/api/uploads/images/', url)
 
     @override_settings(API_PUBLIC_BASE_URL='https://proxy.example.com')
     def test_api_public_base_url_overrides_the_request_host(self):

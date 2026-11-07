@@ -19,6 +19,7 @@ from .serializers import (
     CategorySerializer, TagSerializer,
     ArticleListSerializer, ArticleDetailSerializer, ArticleWriteSerializer,
     ReactionRequestSerializer, ReactionResultSerializer, ViewResultSerializer,
+    ReindexResultSerializer,
     QuizPayloadSerializer, QuizResultSerializer, QuizSubmissionSerializer,
     QuizGenerationRequestSerializer, QuizGenerationResultSerializer,
     QuizQuestionAdminSerializer, QuizReviewPayloadSerializer,
@@ -536,6 +537,17 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         serializer.save()
         return Response(serializer.data)
 
+    @extend_schema(
+        request=None,
+        responses={200: ReindexResultSerializer},
+        summary="Send this article's content to the vector store",
+        description=(
+            'Embedding is deliberately not performed inside `perform_create` / '
+            '`update`: it costs a network round-trip to Pinecone plus a Gemini '
+            'embedding call, which must not block a normal save. Admins trigger it '
+            'explicitly, or via `manage.py ingest_articles`.'
+        ),
+    )
     @action(detail=True, methods=['post'])
     def reindex(self, request, slug=None, **kwargs):
         """Send this article's content to the vector store.

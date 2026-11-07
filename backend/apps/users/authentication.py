@@ -85,10 +85,34 @@ class SupabaseJWTAuthentication(BaseAuthentication):
                 "is_staff": is_admin_email,
                 "is_superuser": is_admin_email,
             }
-            user, created = User.objects.get_or_create(
-                supabase_uid=supabase_uid,
-                defaults=defaults,
-            )
+            user = User.objects.filter(supabase_uid=supabase_uid).first()
+            created = False
+            if not user:
+                # Link pre-existing users created via createsuperuser or seed data
+                # who share this email but do not have a Supabase UID assigned yet.
+                # The lookup is case-insensitive because `email` is lowercased from
+                # the token while a hand-created row may not be; an exact match
+                # would miss it and the insert below would duplicate the account.
+                existing_by_email = User.objects.filter(email__iexact=email).first()
+                if existing_by_email is None:
+                    user, created = User.objects.get_or_create(
+                        supabase_uid=supabase_uid,
+                        defaults=defaults,
+                    )
+                elif not existing_by_email.supabase_uid:
+                    user = existing_by_email
+                    user.supabase_uid = supabase_uid
+                    user.save(update_fields=['supabase_uid'])
+                elif str(existing_by_email.supabase_uid) == str(supabase_uid):
+                    # Same identity under a differently-formatted UID string.
+                    user = existing_by_email
+                else:
+                    # The address already belongs to a different Supabase identity.
+                    # Creating a row now would violate the unique email constraint
+                    # (or silently split the account when only the case differs).
+                    raise AuthenticationFailed(
+                        'This email is already linked to another sign-in account'
+                    )
             if not created:
                 # Supabase UID is the stable identity. Keep local email in sync if changed,
                 # but preserve user profile customizations (username, display_name, avatar_url).

@@ -115,7 +115,7 @@ def _public_url(name: str, request) -> str:
     host = getattr(settings, 'API_PUBLIC_BASE_URL', '') or ''
     if host:
         return f"{host.rstrip('/')}/{path}"
-    return request.build_absolute_uri(path)
+    return request.build_absolute_uri(f"/{path}")
 
 
 class ImageUploadView(APIView):

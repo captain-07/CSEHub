@@ -95,7 +95,7 @@ function renderProfileCard(profile) {
           </div>
           <div class="form-group">
             <label class="form-label" for="display_name">Display Name</label>
-            <input class="input" type="text" id="display_name" name="display_name" value="${escapeHtml(profile.display_name || '')}" required />
+            <input class="input" type="text" id="display_name" name="display_name" value="${escapeHtml(profile.display_name || '')}" />
           </div>
         </div>
 

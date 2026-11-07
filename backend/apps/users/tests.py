@@ -39,6 +39,51 @@ class SupabaseAuthenticationTests(TestCase):
         self.assertEqual(updated.email, 'changed@example.com')
         self.assertEqual(updated.username, 'first')
 
+    @patch('apps.users.authentication.jwt.decode')
+    @patch('apps.users.authentication._get_jwks_client')
+    def test_existing_email_without_uid_is_linked_not_duplicated(self, get_client, decode):
+        """A createsuperuser/seed row must survive its first Google sign-in.
+
+        Before the fix this raised a unique-constraint `IntegrityError` that the
+        outer handler reported as an invalid token, locking the admin out.
+        """
+        existing = get_user_model().objects.create_user(
+            # Mixed case on purpose: the token's email is lowercased, and the
+            # lookup has to still find this row.
+            email='Editor@Example.com', username='editor', is_staff=True, is_superuser=True,
+        )
+        get_client.return_value.get_signing_key_from_jwt.return_value = Mock(key='key')
+        decode.return_value = {
+            'sub': self.uid, 'email': 'editor@example.com',
+            'user_metadata': {'full_name': 'Editor'},
+        }
+
+        user, _ = SupabaseJWTAuthentication().authenticate(self.request())
+
+        self.assertEqual(user.pk, existing.pk)
+        self.assertEqual(str(user.supabase_uid), self.uid)
+        self.assertEqual(
+            get_user_model().objects.filter(email__iexact='editor@example.com').count(), 1
+        )
+        self.assertTrue(user.is_staff and user.is_superuser)
+        # The hand-made profile is preserved rather than overwritten by defaults.
+        self.assertEqual(user.username, 'editor')
+
+    @patch('apps.users.authentication.jwt.decode')
+    @patch('apps.users.authentication._get_jwks_client')
+    def test_email_bound_to_another_identity_is_rejected(self, get_client, decode):
+        get_user_model().objects.create_user(
+            email='claimed@example.com', username='claimed',
+            supabase_uid=uuid4(),
+        )
+        get_client.return_value.get_signing_key_from_jwt.return_value = Mock(key='key')
+        decode.return_value = {'sub': self.uid, 'email': 'claimed@example.com'}
+
+        with self.assertRaises(AuthenticationFailed) as caught:
+            SupabaseJWTAuthentication().authenticate(self.request())
+
+        self.assertIn('already linked', str(caught.exception))
+
     @patch('apps.users.authentication._get_jwks_client')
     def test_missing_or_invalid_tokens_are_rejected_safely(self, get_client):
         self.assertIsNone(SupabaseJWTAuthentication().authenticate(self.factory.get('/api/me/')))

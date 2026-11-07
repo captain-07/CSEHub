@@ -242,6 +242,14 @@ class ViewResultSerializer(serializers.Serializer):
     view_count = serializers.IntegerField()
 
 
+class ReindexResultSerializer(serializers.Serializer):
+    """What `reindex` returns: the article slug, status, and chunk count indexed."""
+
+    status = serializers.CharField()
+    slug = serializers.CharField()
+    chunks = serializers.IntegerField()
+
+
 class QuizOptionSerializer(serializers.Serializer):
     """One option as the reader sees it. `id` is the stored option index."""
 

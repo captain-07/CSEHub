@@ -347,6 +347,7 @@ function initLibrary() {
   // work before hydration and on a failed script too — here we just intercept
   // those navigations to keep them in-page.
   contentArea?.addEventListener('click', (event) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
     const anchor = event.target.closest('a[href]');
     if (!anchor) return;
     const href = anchor.getAttribute('href');

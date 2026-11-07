@@ -4,9 +4,11 @@ import { getSupabase } from './supabase.js';
 // Anything absolute, protocol-relative ("//evil.com"), or otherwise unexpected is
 // rejected so the parameter can never be used as an open redirect.
 const ALLOWED_REDIRECT_PAGES = [
+  '',
   'index.html',
   'articles.html',
   'article.html',
+  'categories.html',
   'profile.html',
   'admin.html',
   'login.html',
