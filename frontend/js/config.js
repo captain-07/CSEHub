@@ -12,6 +12,12 @@ const DEPLOYED_API_BASE_URL = "https://csehub-ezdl.onrender.com";
 const DEPLOYED_SUPABASE_URL = "https://jaihvxmogxxirkynllua.supabase.co";
 const DEPLOYED_SUPABASE_ANON_KEY = "sb_publishable_4tZpmv-fCvK8eLwZfcDKDQ_e9TtqSzv";
 
+// Google Analytics 4 measurement id, from GA4: Admin -> Data streams -> your
+// web stream -> "Measurement ID" (looks like G-XXXXXXXXXX). It is public — it
+// ships in the page and is not a credential. Leave it empty to disable
+// analytics entirely.
+const GA_MEASUREMENT_ID = "G-PH2LL6R9CQ";
+
 // Local development opt-in: when the page is served from a localhost port and a
 // global override is absent, talk to the local Django dev server instead.
 const isLocalhost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
@@ -23,4 +29,6 @@ export const CONFIG = {
   SUPABASE_URL: window.CSEHUB_SUPABASE_URL || DEPLOYED_SUPABASE_URL,
   SUPABASE_ANON_KEY:
     window.CSEHUB_SUPABASE_ANON_KEY || DEPLOYED_SUPABASE_ANON_KEY,
+  // Overridable at runtime like the URLs above; the id is not a secret.
+  GA_MEASUREMENT_ID: window.CSEHUB_GA_ID || GA_MEASUREMENT_ID,
 };

@@ -18,7 +18,7 @@ served from localhost, and the deployed API otherwise.
 
 ## Configuration
 
-`js/config.js` holds the three public values. Override any of them by defining a
+`js/config.js` holds the public values. Override any of them by defining a
 global before the module scripts load:
 
 ```html
@@ -26,6 +26,7 @@ global before the module scripts load:
   window.CSEHUB_API_BASE_URL = "http://127.0.0.1:8000";
   window.CSEHUB_SUPABASE_URL = "https://your-project.supabase.co";
   window.CSEHUB_SUPABASE_ANON_KEY = "sb_publishable_…";
+  window.CSEHUB_GA_ID = "G-XXXXXXXXXX";
 </script>
 ```
 
@@ -47,6 +48,7 @@ One implementation per concern:
 | Auth state       | `js/auth-state.js`                            |
 | OAuth / logout   | `js/auth.js`                                  |
 | Article rendering| `js/renderer.js`                              |
+| Analytics        | `js/analytics.js`                             |
 | Navbar           | `js/navbar.js`                                |
 | Admin panel      | `js/admin.js` (hash-routed)                   |
 | Editor tools     | `js/editor-tools/registry.js` (+ `code-block`, `list-block`, `link-block`) |
@@ -81,6 +83,25 @@ escaped; block types are dispatched through an allow-list; heading levels are
 clamped; URLs are restricted to `http(s)`; and inline markup inside block text
 (Editor.js bold/italic/link/inline-code) is re-admitted only from a small tag
 list, with attributes stripped. Nothing injects untrusted HTML.
+
+## Analytics
+
+`js/analytics.js` is a single GA4 tag, loaded by the five public pages
+(`index`, `articles`, `article`, `categories`, `profile`); `admin.html` and
+`login.html` load nothing.
+
+Paste the **Measurement ID** from GA4 (Admin → Data streams → your web stream)
+into `GA_MEASUREMENT_ID` in `js/config.js`, or set `window.CSEHUB_GA_ID` before
+the modules load. Leave it empty and nothing loads; localhost is skipped either
+way.
+
+There are no custom events. GA4's **Enhanced measurement** supplies page views,
+referrers, devices, scroll depth, outbound clicks and site search — the library
+uses `?search=`, which GA4 recognises. Leave Enhanced measurement enabled in the
+data stream settings.
+
+GA4 sets cookies. If you serve readers in the EU/UK, you need a consent banner
+before this is lawful; none is included.
 
 ## Supabase redirect URLs
 
