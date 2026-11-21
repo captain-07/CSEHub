@@ -52,12 +52,38 @@ for (const { file, target, wanted, spec } of importSites) {
 }
 console.log(problems === 0 ? 'All imports resolve.' : `${problems} problem(s).`);
 
-// Duplicate top-level declarations within a file
+// Duplicate bindings are a *SyntaxError*, not a lint warning: a module with two
+// `friendlyError` imports stops the whole page from running, and none of the
+// checks above parse JavaScript, so the missing-export pass cannot see it. An
+// import is a binding too, which is why imports and top-level declarations are
+// counted in the same map.
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
-  const seen = new Map();
-  for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z0-9_$]+)/gm)) {
-    seen.set(m[1], (seen.get(m[1]) || 0) + 1);
+  const bindings = new Map();
+  const add = (name, kind) => {
+    if (!name) return;
+    if (bindings.has(name)) {
+      console.log(`DUPLICATE BINDING  ${relative('.', file)}: ${name} (${bindings.get(name)} and ${kind})`);
+      problems++;
+    } else {
+      bindings.set(name, kind);
+    }
+  };
+
+  for (const m of src.matchAll(/import\s+(?:([A-Za-z0-9_$]+)\s*,\s*)?(?:\{([^}]*)\}|\*\s+as\s+([A-Za-z0-9_$]+)|([A-Za-z0-9_$]+))\s+from/g)) {
+    const [, defaultWithNamed, named, namespace, defaultOnly] = m;
+    if (defaultWithNamed) add(defaultWithNamed, 'import');
+    if (defaultOnly) add(defaultOnly, 'import');
+    if (namespace) add(namespace, 'import');
+    if (named) {
+      named.split(',').map((s) => s.trim()).filter(Boolean)
+        .forEach((s) => add(s.split(/\s+as\s+/).pop().trim(), 'import'));
+    }
   }
-  for (const [name, n] of seen) if (n > 1) console.log(`DUPLICATE DECL ${file}: ${name} x${n}`);
+
+  for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z0-9_$]+)/gm)) {
+    add(m[1], 'declaration');
+  }
 }
+
+if (problems) process.exitCode = 1;
