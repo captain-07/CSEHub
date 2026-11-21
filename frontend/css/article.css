@@ -396,6 +396,29 @@
   transform: translateY(-1px);
 }
 
+/* Share / download controls. They sit under the tags because they act on the
+ * article as a whole, not on any one part of its text. */
+.article-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: 1.5rem;
+}
+
+.article-actions .button {
+  gap: 0.45rem;
+  font-size: var(--text-sm);
+}
+
+/* The share glyph inherits the button's colour, so it needs no dark-mode
+ * variant of its own. `flex: none` stops it squashing when the label wraps. */
+.article-share-icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+
 /* ── Article body ────────────────────────────────────────────── */
 .article-content {
   padding: 2.75rem 0;
@@ -1028,4 +1051,96 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+/* ── Paywall ─────────────────────────────────────────────────────
+   The locked state replaces the body entirely; the server sends no content to
+   hide. Everything here is the sales pitch, so it is deliberately centred and
+   self-contained rather than looking like a truncated article. */
+.paywall {
+  margin: 2.5rem 0 1.5rem;
+}
+
+.paywall-card {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+  background-color: var(--bg-secondary);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(var(--shade-rgb), 0.08);
+}
+
+.paywall-eyebrow {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.paywall-title {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+}
+
+.paywall-copy {
+  margin: 0 auto;
+  max-width: 28rem;
+  color: var(--text-secondary);
+}
+
+.paywall-benefits {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 22rem;
+  margin: 1.25rem auto;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.paywall-benefit {
+  position: relative;
+  padding-left: 1.6rem;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+
+.paywall-benefit::before {
+  content: '\2713';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.paywall-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.paywall-price {
+  font-size: 1.9rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+}
+
+.paywall-note {
+  margin: 1rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
 }

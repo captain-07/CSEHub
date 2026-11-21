@@ -27,12 +27,16 @@ const DEFAULT_TIMEOUT_MS = 20_000;
  */
 export async function apiFetch(endpoint, options = {}) {
   const url = buildApiUrl(endpoint);
-  const { timeout = DEFAULT_TIMEOUT_MS, ...request } = options;
+  // `responseType: 'blob'` is how a binary body (the paid article's PDF) is
+  // handed back whole. A JSON response is still parsed for *errors* in that
+  // mode, because the server explains a 402/404 in JSON; every other caller
+  // gets the usual parsed payload.
+  const { timeout = DEFAULT_TIMEOUT_MS, responseType = 'json', ...request } = options;
 
   // Set up default headers
   const headers = new Headers(request.headers || {});
   if (!headers.has('Accept')) {
-    headers.set('Accept', 'application/json');
+    headers.set('Accept', responseType === 'blob' ? '*/*' : 'application/json');
   }
 
   // Retrieve Supabase JWT token and append to request if found
@@ -74,7 +78,9 @@ export async function apiFetch(endpoint, options = {}) {
 
   const contentType = response.headers.get("content-type") || "";
   let data = null;
-  if (contentType.includes("application/json")) {
+  if (response.ok && responseType === 'blob') {
+    data = await response.blob();
+  } else if (contentType.includes("application/json")) {
     data = await response.json();
   }
 
@@ -140,7 +146,14 @@ export function friendlyError(error) {
     if (error.status === 403) return 'You are not authorised to perform that action.';
     if (error.status === 404) return 'That item could not be found. It may have been removed.';
     if (error.status === 0) return error.message || 'Cannot reach the CSEHub API. Check your connection.';
-    if (error.status >= 500) return 'The CSEHub server had a problem. Please try again in a moment.';
+    if (error.status >= 500) {
+      // A 5xx that explains itself ("Payments are not configured yet. Nothing
+      // has been charged.") is more useful than "the server had a problem", and
+      // a generic failure carries no detail and falls through to the neutral
+      // sentence below.
+      const detail = typeof error.details?.detail === 'string' ? error.details.detail : '';
+      return detail || 'The CSEHub server had a problem. Please try again in a moment.';
+    }
 
     const details = error.details;
     if (details && typeof details === 'object') {

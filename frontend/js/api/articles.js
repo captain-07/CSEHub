@@ -34,6 +34,20 @@ export function getArticle(id, options) {
   return apiFetch(`/articles/${encodeURIComponent(id)}/`, options);
 }
 
+/**
+ * The PDF edition of a paid article, as a Blob.
+ *
+ * The server re-checks the purchase on every request, so this can fail with a
+ * 402 even when the page said `has_access` a minute ago. `responseType` is what
+ * makes `apiFetch` hand back the file instead of trying to JSON-parse it.
+ */
+export function getArticlePdf(id, options = {}) {
+  return apiFetch(`/articles/${encodeURIComponent(id)}/pdf/`, {
+    responseType: 'blob',
+    ...options,
+  });
+}
+
 export function createArticle(payload) {
   return apiFetch('/articles/', { method: 'POST', body: payload });
 }

@@ -398,6 +398,27 @@ export function formatViews(count) {
   return `${total.toLocaleString('en-US')} ${total === 1 ? 'view' : 'views'}`;
 }
 
+/**
+ * A price in rupees, for the card badge and the paywall.
+ *
+ * The API sends `price` as a decimal string ("149.00") because money should not
+ * round-trip through a float. A whole price drops its ".00" — "₹149" reads like
+ * a price where "₹149.00" reads like a receipt — while a price entered with
+ * paise keeps them, so the label never disagrees with what will be charged.
+ * Returns '' for a missing or zero value so callers can fall back rather than
+ * render "₹0".
+ */
+export function formatPrice(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
 /*
  * The providers this site will frame inline, and what a valid id looks like for
  * each. The id is the *only* thing taken from a pasted URL: the frame's source is
@@ -540,6 +561,10 @@ export function articleCardMarkup(article, { featured = false } = {}) {
   // counter had never shipped at all.
   const views = Number(article.view_count) || 0;
   const categoryName = (article.category && article.category.name) || 'General';
+  // A paid card carries its price in the meta row, ahead of the subject: the
+  // first thing worth knowing about it is that it is not free. `is_paid` is on
+  // the list payload; the body never is.
+  const price = article.is_paid ? formatPrice(article.price) : '';
   // Every card gets a media strip, so no card starts its text at a different
   // height from its neighbours. Without a cover, the strip carries the subject
   // as a large ghosted word rather than sitting there blank.
@@ -552,6 +577,7 @@ export function articleCardMarkup(article, { featured = false } = {}) {
       ${media}
       <div class="article-card-body">
         <p class="card-meta">
+          ${article.is_paid ? `<span class="badge badge-paid">${price ? `Paid · ${escapeHtml(price)}` : 'Paid'}</span>` : ''}
           ${featured ? '<span class="badge">Featured</span>' : ''}
           ${article.category
             ? `<a href="articles.html?category=${encodeURIComponent(article.category.slug)}">${escapeHtml(article.category.name)}</a>`

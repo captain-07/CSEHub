@@ -385,6 +385,15 @@
   margin-right: 0.1rem;
 }
 
+/* Paid leads the meta row in the same slot as Featured, so the two need to be
+   distinguishable at a glance: paid gets the solid accent, featured keeps the
+   soft chip. The price travels with it because "Paid" alone says nothing about
+   what the reader is about to spend. */
+.card-meta .badge-paid {
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+
 /* The separator lives on the item it introduces, not in a span of its own. A
    standalone separator span is laid out before the item it belongs to, so when
    the meta line wraps it is left dangling at the end of the previous line. As a

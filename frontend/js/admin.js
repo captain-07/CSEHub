@@ -976,6 +976,22 @@ function articleFormMarkup(article) {
             </div>
 
             <div class="inspector-card">
+              <h3 class="inspector-title">Pricing</h3>
+              <div class="check-row-group">
+                <label class="check-row">
+                  <input type="checkbox" name="is_paid" id="f-is-paid" ${article?.is_paid ? 'checked' : ''} />
+                  <span>Paid article — only buyers can read it</span>
+                </label>
+              </div>
+              <div class="field" id="price-field" ${article?.is_paid ? '' : 'hidden'}>
+                <label for="f-price">Price (INR)<span class="field-required" aria-hidden="true">*</span></label>
+                <input class="input" id="f-price" name="price" type="number" min="1" step="0.01" required
+                  value="${escapeHtml(article?.price ?? '')}" placeholder="149" />
+                <span class="field-hint">Charged once. Buyers can also download the article as a PDF.</span>
+              </div>
+            </div>
+
+            <div class="inspector-card">
               <h3 class="inspector-title">Taxonomy</h3>
               <div class="field">
                 <label for="f-category">Category</label>
@@ -1253,6 +1269,8 @@ function setupArticleFormInteractions(form, article) {
           tags: [...(form.tags?.selectedOptions || [])].map((o) => o.value),
           is_published: Boolean(form.is_published?.checked),
           is_featured: Boolean(form.is_featured?.checked),
+          is_paid: Boolean(form.is_paid?.checked),
+          price: form.price?.value || '',
           content,
           savedAt: Date.now(),
         };
@@ -1266,6 +1284,20 @@ function setupArticleFormInteractions(form, article) {
       }
     }, 1500);
   }
+
+  // Pricing: the price input is only meaningful while the article is paid, so
+  // ticking the box reveals the one field the save path will then require.
+  function updatePriceVisibility() {
+    const priceField = document.querySelector('#price-field');
+    if (priceField) priceField.hidden = !form.is_paid?.checked;
+  }
+  form.is_paid?.addEventListener('change', () => {
+    formIsDirty = true;
+    updateSaveIndicator(true);
+    updatePriceVisibility();
+    scheduleAutosave();
+  });
+  updatePriceVisibility();
 
   // Update handlers
   form.addEventListener('input', () => {
@@ -1432,6 +1464,8 @@ function setupArticleFormInteractions(form, article) {
             if (draft.category) form.category.value = draft.category;
             if (draft.is_published !== undefined) form.is_published.checked = draft.is_published;
             if (draft.is_featured !== undefined) form.is_featured.checked = draft.is_featured;
+            if (draft.is_paid !== undefined && form.is_paid) form.is_paid.checked = draft.is_paid;
+            if (draft.price !== undefined && form.price) form.price.value = draft.price;
             if (draft.tags && form.tags) {
               const set = new Set(draft.tags.map(String));
               [...form.tags.options].forEach((o) => { o.selected = set.has(String(o.value)); });
@@ -1445,6 +1479,7 @@ function setupArticleFormInteractions(form, article) {
             updateVideoBadge();
             updateTagsPreview();
             updateExcerptCounter();
+            updatePriceVisibility();
             statusMessage('Local draft restored.', 'info');
           });
 
@@ -1510,6 +1545,10 @@ async function collectPayload() {
     content,
     is_published: form.is_published.checked,
     is_featured: form.is_featured.checked,
+    is_paid: Boolean(form.is_paid?.checked),
+    // Kept even while the article is free, so unticking the box does not erase
+    // the price the author set earlier. The server only enforces it when paid.
+    price: Number(form.price?.value || 0),
   };
 }
 
@@ -1550,6 +1589,14 @@ async function saveArticle(event, article) {
 
     if (missing.length) {
       statusMessage(`An article needs ${missing.join(' and ')} before it can be saved.`, 'error');
+      restoreSaveButton();
+      return;
+    }
+
+    // The server refuses this too, but catching it here keeps the author from
+    // spending a round-trip to be told about a field sitting in the sidebar.
+    if (payload.is_paid && !(payload.price >= 1)) {
+      statusMessage('Set a price of at least 1, or untick "Paid article".', 'error');
       restoreSaveButton();
       return;
     }

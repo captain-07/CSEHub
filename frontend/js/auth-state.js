@@ -22,7 +22,6 @@ let state = {
   status: 'loading',
 };
 
-let initialized = false;
 let initialisedPromise = null;
 const listeners = new Set();
 
@@ -83,7 +82,12 @@ function applyPendingRedirect() {
 }
 
 export async function initAuth() {
-  if (initialized) return initialisedPromise;
+  // Guard on the *promise*, not on a resolved flag: a second caller arriving
+  // while the first session lookup is still in flight would otherwise start a
+  // second `onAuthStateChange` subscription and hydrate the profile twice. The
+  // article page now awaits this to decide whether its paywall offers a
+  // "Sign in" link or a "Buy" button, so that race is reachable.
+  if (initialisedPromise) return initialisedPromise;
 
   const supabase = getSupabase();
   if (!supabase) {
@@ -107,7 +111,6 @@ export async function initAuth() {
       hydrate(session);
     });
 
-    initialized = true;
     return state;
   })();
 
