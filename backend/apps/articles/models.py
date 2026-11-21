@@ -84,6 +84,16 @@ class Article(models.Model):
     )
     is_published = models.BooleanField(default=False)
     is_featured = models.BooleanField(default=False)
+    # A paid article's body is withheld from anyone without a purchase. The gate
+    # itself lives in `apps.payments.access.can_read_article` rather than here,
+    # so the model does not have to know about payments; this flag only says
+    # that the gate applies.
+    is_paid = models.BooleanField(default=False)
+    # Price in INR. Razorpay is told paise (this value x 100), but the editor
+    # thinks in rupees, so the model stores the human unit and the checkout
+    # converts once. Kept even while `is_paid` is false, so unticking the box
+    # does not erase the price the author set earlier.
+    price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     # Denormalized tallies, kept in step by `ArticleReactionManager.set_reaction`.
     # Stored rather than aggregated so the article list — which every page of the
     # site reads, and which already ends in `.distinct()` — never pays for a
@@ -105,6 +115,15 @@ class Article(models.Model):
         indexes = [
             models.Index(fields=['-is_published', '-created_at']),
             models.Index(fields=['is_featured']),
+        ]
+        constraints = [
+            # `is_paid` without a sensible price would put an article behind a
+            # checkout that cannot be completed. `price` stays populated while
+            # the article is free, so the check only applies to the paid state.
+            models.CheckConstraint(
+                condition=models.Q(is_paid=False) | models.Q(price__gte=1),
+                name='article_paid_price_minimum',
+            ),
         ]
 
     def __str__(self):

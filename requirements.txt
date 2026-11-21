@@ -21,6 +21,14 @@ cloudinary==1.44.0
 django-cloudinary-storage==0.3.0
 Pillow==12.1.0
 
+# Payments (paid articles). Pure Python; the checkout sheet itself is the
+# provider's own script, loaded in the browser.
+razorpay==2.0.1
+
+# PDF edition of a paid article. Pure Python on purpose: WeasyPrint needs
+# pango/cairo in the image, and the Dockerfile is a bare python:3.12-slim.
+reportlab==5.1.0
+
 # RAG chat and structured AI output
 pinecone==7.3.0
 pydantic==2.12.5

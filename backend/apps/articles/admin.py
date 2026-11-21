@@ -42,8 +42,9 @@ class ArticleTagInline(admin.TabularInline):
 @admin.register(Article)
 class ArticleAdmin(admin.ModelAdmin):
     list_display = ['title', 'category', 'author', 'is_published', 'is_featured',
-                    'like_count', 'dislike_count', 'view_count', 'created_at']
-    list_filter = ['category', 'is_published', 'is_featured']
+                    'is_paid', 'price', 'like_count', 'dislike_count', 'view_count',
+                    'created_at']
+    list_filter = ['category', 'is_published', 'is_featured', 'is_paid']
     # `content` is a JSONField, which has no text lookup — searching it raises
     # FieldError, so the admin searches the human-readable text fields instead.
     search_fields = ['title', 'excerpt']

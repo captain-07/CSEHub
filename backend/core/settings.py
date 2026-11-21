@@ -61,7 +61,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'apps.articles',
     'apps.users',
-    
+    'apps.payments',
+
     'apps.chatbot',
     'django_filters',
     'drf_spectacular',
@@ -313,4 +314,16 @@ GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash-lite')
 # background thread. Off under the test runner (where it would hit providers)
 # and a no-op when the Pinecone/Gemini settings above are absent.
 RAG_AUTO_INDEX = env.bool('RAG_AUTO_INDEX', default=not TESTING)
+
+# --- Payments ---------------------------------------------------------------
+#
+# Razorpay. Absent keys do not stop the site from starting: free articles keep
+# working, and checkout answers 503 rather than the project refusing to boot.
+# The key id is public (the browser's checkout script needs it); the pair is the
+# credential. `RAZORPAY_WEBHOOK_SECRET` is a *different* value, set on the
+# endpoint when it is registered in the dashboard — Razorpay signs each delivery
+# with that secret, not with the API secret, so it has to be read separately.
+RAZORPAY_KEY_ID = env('RAZORPAY_KEY_ID', default='')
+RAZORPAY_KEY_SECRET = env('RAZORPAY_KEY_SECRET', default='')
+RAZORPAY_WEBHOOK_SECRET = env('RAZORPAY_WEBHOOK_SECRET', default='')
 

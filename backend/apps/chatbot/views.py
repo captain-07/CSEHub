@@ -6,6 +6,7 @@ from rest_framework.generics import get_object_or_404
 from rest_framework import status
 from drf_spectacular.utils import extend_schema
 from apps.articles.models import Article
+from apps.payments.access import PAID_ARTICLE_MESSAGE, can_read_article
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, AskQuestionSerializer
 from .rag_chat import answer_question, ChatServiceError
@@ -47,6 +48,15 @@ class AskArticleView(APIView):
             article = Article.objects.filter(pk=int(slug), is_published=True).first()
         if not article:
             raise Http404("No published article found matching the query")
+
+        # The assistant answers *from* the article's indexed content, so this
+        # route is a full-text back door unless it consults the same gate as
+        # the article itself.
+        if not can_read_article(request.user, article):
+            return Response(
+                {'detail': PAID_ARTICLE_MESSAGE},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
 
         serializer = AskQuestionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -109,6 +119,14 @@ class ConversationDetailView(APIView):
             article = Article.objects.filter(pk=int(slug), is_published=True).first()
         if not article:
             raise Http404("No published article found matching the query")
+
+        # Stored replies quote the article, so the history is content too. A
+        # reader whose access has lapsed must not read it back through here.
+        if not can_read_article(request.user, article):
+            return Response(
+                {'detail': PAID_ARTICLE_MESSAGE},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
 
         conversation = Conversation.objects.filter(
             user=request.user, article=article

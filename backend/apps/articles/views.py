@@ -8,11 +8,14 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q, ProtectedError
-from django.http import Http404
+from django.http import Http404, HttpResponse
+from django.utils.text import slugify
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters.rest_framework.filterset import BooleanFilter, FilterSet
 from apps.chatbot.ingestion import ingest_article
+from apps.payments.access import PAID_ARTICLE_MESSAGE, can_read_article
 from .models import Category, Tag, Article, ArticleReaction, REACTION_NONE
 from .permissions import IsArticleAuthorOrSuperuser, IsAuthorOrReadOnly
 from .serializers import (
@@ -314,12 +317,77 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         """
         article = self.get_object()
 
+        # A locked page is a sales pitch, not a read: only count the view when
+        # the body was actually served. The response shape stays the same so
+        # the client's tally code needs no special case.
+        if not can_read_article(request.user, article):
+            return Response({'view_count': article.view_count})
+
         # Staff are checking their own work, not reading it. Only staff, because
         # an ordinary signed-in reader is exactly who the counter is for.
         if request.user.is_authenticated and request.user.is_staff:
             return Response({'view_count': article.view_count})
 
         return Response({'view_count': article.record_view()})
+
+    @extend_schema(
+        responses={(200, 'application/pdf'): OpenApiTypes.BINARY},
+        summary='Download this article as a PDF',
+        description=(
+            'Serves the article body as a PDF. Paid articles only: a free '
+            'article is readable on the page itself and has no edition to '
+            'download, so the route answers 404. A paid article answers 402 '
+            'until the caller holds a purchase, exactly like every other '
+            'content-bearing route.'
+        ),
+    )
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, slug=None, **kwargs):
+        """The paid edition, as a file.
+
+        Public in the permission sense and gated here in the same breath as the
+        quiz: the server, not the CSS, decides who may read the body, and a
+        download is the whole body in one response. The action is deliberately
+        absent from ADMIN_ACTIONS/AUTHENTICATED_ACTIONS because it is an
+        ordinary reader route — `can_read_article` is the permission.
+        """
+        article = self.get_object()
+
+        if not article.is_paid:
+            return Response(
+                {'detail': 'Only paid articles have a downloadable PDF.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not can_read_article(request.user, article):
+            return Response(
+                {'detail': PAID_ARTICLE_MESSAGE},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+
+        # Imported here rather than at module scope so a deployment without
+        # ReportLab still serves the rest of the API and fails only this route.
+        try:
+            from .pdf import render_article_pdf
+        except ImportError:
+            return Response(
+                {'detail': 'PDF export is unavailable on this server.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        user = request.user
+        licensed_to = ''
+        if user and user.is_authenticated:
+            licensed_to = getattr(user, 'display_name', '') or user.email or ''
+
+        payload = render_article_pdf(article, licensed_to=licensed_to)
+        response = HttpResponse(payload, content_type='application/pdf')
+        filename = f'{slugify(article.slug) or "article"}.pdf'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        # Paid writing must not sit in a shared cache, or in this browser's
+        # disk cache after the reader signs out.
+        response['Cache-Control'] = 'private, no-store'
+        return response
 
     @extend_schema(request=None, responses={200: QuizPayloadSerializer})
     @action(detail=True, methods=['get'])
@@ -337,6 +405,12 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         the response to `quiz/submit/`.
         """
         article = self.get_object()
+        if not can_read_article(request.user, article):
+            return Response(
+                {'detail': PAID_ARTICLE_MESSAGE},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+
         questions = list(article.quiz_questions.filter(is_active=True))
         questions = random.sample(
             questions, min(MAX_QUIZ_QUESTIONS, len(questions))
@@ -378,6 +452,11 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
         article, so a client cannot grade questions it was never shown.
         """
         article = self.get_object()
+        if not can_read_article(request.user, article):
+            return Response(
+                {'detail': PAID_ARTICLE_MESSAGE},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
 
         serializer = QuizSubmissionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

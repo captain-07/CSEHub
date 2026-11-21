@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from django.db import transaction
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema_field
 
+from apps.payments.access import can_read_article
 from .models import (
     Category, Tag, Article, ArticleReaction, CodeSnippet, QuizQuestion,
     SUPPORTED_BLOCK_TYPES, REACTION_LIKE, REACTION_DISLIKE, REACTION_NONE,
@@ -144,13 +146,16 @@ class ArticleListSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'category', 'tags',
                   'author_name', 'author_email', 'reading_time',
                   'like_count', 'dislike_count', 'view_count',
+                  'is_paid', 'price',
                   'is_published', 'is_featured', 'created_at', 'updated_at']
         # The tallies are derived from ArticleReaction rows by the manager, and
         # `view_count` is written only by `Article.record_view`. They are
         # declared read-only explicitly rather than relying on the serializer
         # never being used for writes, so that adding them here cannot quietly
         # turn them into client-settable fields on a future write serializer.
-        read_only_fields = ['like_count', 'dislike_count', 'view_count']
+        # `is_paid`/`price` are here for the same reason: the list is a badge,
+        # and pricing is set through `ArticleWriteSerializer`.
+        read_only_fields = ['like_count', 'dislike_count', 'view_count', 'is_paid', 'price']
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
@@ -172,6 +177,10 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     # Lets the article page hide the "Quiz me" button when an article has no
     # questions. One extra query on the detail route, not on the list route.
     quiz_question_count = serializers.SerializerMethodField()
+    # Whether the body below was actually served. The client reads this rather
+    # than inferring a paywall from `is_paid`, because a buyer is looking at a
+    # paid article whose body they are allowed to see.
+    has_access = serializers.SerializerMethodField()
 
     class Meta:
         model = Article
@@ -179,9 +188,10 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
             'id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'content', 'category',
             'tags', 'code_snippets', 'author_name', 'author_email', 'reading_time',
             'like_count', 'dislike_count', 'view_count', 'my_reaction', 'quiz_question_count',
+            'is_paid', 'price', 'has_access',
             'is_published', 'is_featured', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['like_count', 'dislike_count', 'view_count']
+        read_only_fields = ['like_count', 'dislike_count', 'view_count', 'is_paid', 'price']
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_author_name(self, article):
@@ -208,6 +218,31 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.IntegerField())
     def get_quiz_question_count(self, article):
         return article.quiz_questions.filter(is_active=True).count()
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_has_access(self, article):
+        request = self.context.get('request')
+        return can_read_article(getattr(request, 'user', None), article)
+
+    def to_representation(self, instance):
+        """Serve the body only when the gate allows it.
+
+        The redaction has to happen here, not in the client: an anonymous
+        request for a paid article must not receive the writing at all. The
+        teaser fields — excerpt, cover, byline, reading time, tags — survive so
+        the page can still pitch the article.
+        """
+        data = super().to_representation(instance)
+        if data.get('has_access'):
+            return data
+
+        # Withhold the body outright. A shortened document is still the article,
+        # and `code_snippets`/`video_url`/the quiz are content-bearing too.
+        data['content'] = None
+        data['code_snippets'] = []
+        data['video_url'] = ''
+        data['quiz_question_count'] = 0
+        return data
 
 
 class ArticleReactionSerializer(serializers.ModelSerializer):
@@ -403,6 +438,11 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
     )
     code_snippets = CodeSnippetSerializer(many=True, required=False)
     slug = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    # Explicit rather than generated so a negative value is a field error, not
+    # an IntegrityError from the model's check constraint.
+    price = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=Decimal('0'), required=False
+    )
     # Gated by `_reject_author_reassignment`: a plain admin sending this is
     # refused, because writes are scoped to the article's own author and a
     # writable `author` would otherwise let any admin PATCH someone else's
@@ -416,7 +456,8 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
         model = Article
         fields = [
             'id', 'title', 'slug', 'excerpt', 'featured_image', 'video_url', 'content', 'category', 'tags',
-            'code_snippets', 'author', 'is_published', 'is_featured', 'created_at', 'updated_at',
+            'code_snippets', 'author', 'is_paid', 'price', 'is_published', 'is_featured',
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -443,11 +484,22 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
             })
 
     def validate(self, attrs):
-        """Derive a unique slug when the client leaves it blank.
+        """Validate pricing, then derive a unique slug when it is blank.
 
         On a partial update neither title nor slug may be present, so the
         existing slug is retained rather than demanding one from the client.
         """
+        # Checked against the *effective* values: a PATCH that only ticks
+        # `is_paid` has no `price` in `attrs`, and the stored price is what the
+        # database constraint will see. Catching it here turns a 500 from that
+        # constraint into a field error the admin can render.
+        is_paid = attrs.get('is_paid', getattr(self.instance, 'is_paid', False))
+        price = attrs.get('price', getattr(self.instance, 'price', Decimal('0')))
+        if is_paid and (price is None or price < Decimal('1')):
+            raise serializers.ValidationError({
+                'price': 'A paid article needs a price of at least 1.'
+            })
+
         self._reject_author_reassignment()
         slug = (attrs.get('slug') or '').strip()
         title = (attrs.get('title') or '').strip()
