@@ -252,6 +252,7 @@ Once the server is running, navigate to:
 - **OpenAPI Schema** — `http://localhost:8000/api/schema/`
 - **Swagger UI** — `http://localhost:8000/api/docs/`
 - **ReDoc** — `http://localhost:8000/api/redoc/`
+- **Health check** — `http://localhost:8000/healthz/` (outside `/api/`). Returns `200 {"status": "ok"}`, or `503 {"status": "degraded"}` when the database cannot be reached. Point an uptime monitor here to keep a free-tier instance from spinning down; it is not cached and takes no authentication.
 
 
 

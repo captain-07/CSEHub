@@ -14,11 +14,20 @@ export class ApiError extends Error {
  * How long a request may hang before it is abandoned.
  *
  * Nothing used to bound a request, so a stalled connection left every page
- * spinning forever. Twenty seconds is longer than any normal API call here and
- * short enough that the reader gets a retry before giving up. Image uploads
- * pass their own, larger limit.
+ * spinning forever. Thirty seconds is longer than any normal API call here, and
+ * long enough to cover a sleeping Render free instance coming back up (the
+ * first response after an idle spin-down can take 30-60s). Image uploads pass
+ * their own, larger limit.
  */
-const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Statuses a starting instance or its proxy returns before the app can answer.
+ *
+ * Only reads are retried. A retried POST is how a buyer ends up with two orders,
+ * so the method gate matters more than the status list.
+ */
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 
 /**
  * Reusable utility for sending requests to the Django REST Framework backend.
@@ -57,24 +66,37 @@ export async function apiFetch(endpoint, options = {}) {
 
   // The controller is local because no caller supplies a signal today; if one
   // ever does, the two have to be merged rather than the caller's dropped.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  //
+  // A sleeping free-tier instance answers this request late, or with a 502/503
+  // while it boots. Reads therefore get one second attempt; writes do not,
+  // because a duplicated checkout is worse than a visible failure.
+  const method = (request.method || 'GET').toUpperCase();
+  const retryable = method === 'GET' || method === 'HEAD';
+  const attempts = retryable ? 2 : 1;
 
   let response;
-  try {
-    response = await fetch(url, { ...request, headers, signal: controller.signal });
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      // Only this timeout can abort, so this is never a caller's cancellation.
-      throw new ApiError(
-        `The server did not respond in time (${Math.round(timeout / 1000)}s). Check your connection and try again.`,
-        0
-      );
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      response = await fetchWithTimeout(url, request, headers, timeout);
+    } catch (error) {
+      lastError = error;
+      if (!retryable) throw error;
+      continue;
     }
-    throw new ApiError("Unable to reach the CSEHub API. Check your connection and try again.", 0);
-  } finally {
-    clearTimeout(timer);
+
+    if (retryable && attempt + 1 < attempts && RETRYABLE_STATUSES.has(response.status)) {
+      // Release the failed response before opening another connection.
+      if (response.body && typeof response.body.cancel === 'function') {
+        response.body.cancel().catch(() => {});
+      }
+      response = undefined;
+      continue;
+    }
+    break;
   }
+
+  if (!response) throw lastError;
 
   const contentType = response.headers.get("content-type") || "";
   let data = null;
@@ -116,6 +138,32 @@ export async function apiFetch(endpoint, options = {}) {
   }
 
   return data;
+}
+
+/**
+ * One fetch with its own abort timer.
+ *
+ * The controller is built per attempt because an aborted signal cannot be
+ * reused: a retry handed the same signal would abort instantly instead of
+ * getting a fresh thirty seconds.
+ */
+async function fetchWithTimeout(url, request, headers, timeout) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetch(url, { ...request, headers, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      // Only this timer can abort, so this is never a caller's cancellation.
+      throw new ApiError(
+        `The server did not respond in time (${Math.round(timeout / 1000)}s). It may be starting up - please try again in a moment.`,
+        0
+      );
+    }
+    throw new ApiError("Unable to reach the CSEHub API. Check your connection and try again.", 0);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function buildApiUrl(endpoint) {
