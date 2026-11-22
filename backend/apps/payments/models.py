@@ -61,6 +61,12 @@ class Purchase(models.Model):
     # Indexed because the refund webhook arrives carrying only the payment id
     # and has to find the row it settles.
     provider_payment_id = models.CharField(max_length=100, blank=True, db_index=True)
+    # The phone number the buyer entered at checkout, copied off the provider's
+    # payment entity after it captured. Kept on the attempt rather than on the
+    # user because it is what the buyer actually used: `CheckoutView` prefills
+    # the next purchase from the newest row that carries one, so the sheet stops
+    # asking on every visit without anyone maintaining a profile field.
+    contact = models.CharField(max_length=20, blank=True)
     # Razorpay states amounts in paise. Stored as an integer rather than a
     # decimal because it is the exact unit the provider is told and checked
     # against — no rounding can creep in between the two.

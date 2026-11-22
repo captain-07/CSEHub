@@ -63,6 +63,20 @@ def _paid_payload(purchase):
     }
 
 
+def _remember_contact(purchase, contact):
+    """Keep the number the buyer used, so the next sheet starts prefilled.
+
+    Razorpay's payment entity carries the contact the sheet collected; copying
+    it onto the attempt is what lets `CheckoutView` stop asking for it on the
+    next purchase. Only a non-empty, changed value is written, and never as a
+    side effect of the settlement itself: losing this number must not fail a
+    payment that already went through.
+    """
+    if contact and purchase.contact != contact:
+        purchase.contact = contact
+        purchase.save(update_fields=['contact'])
+
+
 class CheckoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -130,6 +144,22 @@ class CheckoutView(APIView):
         purchase.provider_order_id = order['id']
         purchase.save(update_fields=['provider_order_id'])
 
+        # Prefill everything the sheet would otherwise ask for. `contact` comes
+        # from the buyer's last settled payment, not from a profile field, so a
+        # first purchase pays the cost once and every later one does not.
+        last_contact = (
+            Purchase.objects.filter(user=request.user)
+            .exclude(contact='')
+            .order_by('-created_at')
+            .values_list('contact', flat=True)
+            .first()
+        )
+        prefill = {'email': request.user.email}
+        if request.user.display_name:
+            prefill['name'] = request.user.display_name
+        if last_contact:
+            prefill['contact'] = last_contact
+
         return Response(
             {
                 'purchase_id': purchase.pk,
@@ -140,7 +170,7 @@ class CheckoutView(APIView):
                 'currency': purchase.currency,
                 'name': 'CSEHub',
                 'description': article.title[:200],
-                'prefill': {'email': request.user.email},
+                'prefill': prefill,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -245,6 +275,9 @@ class VerifyPaymentView(APIView):
                     },
                     status=status.HTTP_202_ACCEPTED,
                 )
+            # Remembered before the grant so a retried verification, which
+            # returns early while already paid, does not need to do it again.
+            _remember_contact(purchase, payment.get('contact', ''))
 
         purchase.record_payment(data['razorpay_payment_id'])
         return Response(_paid_payload(purchase))
@@ -339,7 +372,12 @@ def _apply_event(event_type, payload):
             logger.warning('Razorpay %s for unknown order %s', event_type, order_id)
             return False
         if event_type == 'payment.captured':
-            return purchase.record_payment(payment.get('id', ''))
+            settled = purchase.record_payment(payment.get('id', ''))
+            # The capture is the only delivery guaranteed to carry the contact
+            # the buyer typed, so it is stored even when the row was already
+            # settled by the browser's verify call.
+            _remember_contact(purchase, payment.get('contact', ''))
+            return settled
         return purchase.mark_failed()
 
     if event_type in ('refund.created', 'refund.processed'):

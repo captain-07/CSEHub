@@ -20,7 +20,7 @@ class PurchaseAdmin(admin.ModelAdmin):
     list_filter = ['status', 'provider', 'currency']
     search_fields = [
         'article__title', 'user__email', 'provider_order_id',
-        'provider_payment_id', 'receipt',
+        'provider_payment_id', 'receipt', 'contact',
     ]
     list_select_related = ['article', 'user']
     readonly_fields = ['created_at']

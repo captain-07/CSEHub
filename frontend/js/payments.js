@@ -76,6 +76,10 @@ export async function buyArticle(article) {
       name: order.name,
       description: order.description,
       prefill: order.prefill || {},
+      // Offer the saved card on a repeat purchase. Razorpay identifies the
+      // reader by the prefilled email/contact, so this is what turns a second
+      // buy into one tap instead of re-entering a card.
+      remember_customer: true,
       // The light accent: the sheet is always light, whatever the page theme.
       theme: { color: '#27644c' },
       handler: async (response) => {

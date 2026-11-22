@@ -110,6 +110,41 @@ class CheckoutTests(PaymentAPITestCase):
         self.assertTrue(purchase.receipt.startswith('csehub-'))
         self.assertLessEqual(len(purchase.receipt), 40)
 
+    def test_checkout_prefills_the_contact_from_the_last_payment(self):
+        """A returning buyer types their number once; later sheets start filled."""
+        other = Article.objects.create(
+            title='Other paid', slug='other-paid', content=BODY,
+            is_published=True, author=self.author, is_paid=True,
+            price=Decimal('5.00'),
+        )
+        Purchase.objects.create(
+            user=self.reader, article=other, status=Purchase.STATUS_PAID,
+            amount_paise=500, provider_order_id='order_previous',
+            contact='+919000090000',
+        )
+        self.reader.display_name = 'Reader One'
+        self.reader.save(update_fields=['display_name'])
+
+        self.client.force_authenticate(self.reader)
+        with patch('apps.payments.gateway.create_order', return_value={'id': 'order_abc'}):
+            response = self.client.post(
+                '/api/payments/checkout/', {'slug': 'paid-article'}, format='json'
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['prefill']['contact'], '+919000090000')
+        self.assertEqual(response.data['prefill']['name'], 'Reader One')
+        self.assertEqual(response.data['prefill']['email'], 'reader@example.com')
+
+    def test_checkout_invents_no_contact_before_one_is_known(self):
+        self.client.force_authenticate(self.reader)
+        with patch('apps.payments.gateway.create_order', return_value={'id': 'order_abc'}):
+            response = self.client.post(
+                '/api/payments/checkout/', {'slug': 'paid-article'}, format='json'
+            )
+
+        self.assertNotIn('contact', response.data['prefill'])
+
     def test_a_client_supplied_amount_is_ignored(self):
         self.client.force_authenticate(self.reader)
         with patch('apps.payments.gateway.create_order', return_value={'id': 'order_abc'}) as create:
@@ -206,6 +241,7 @@ class VerifyTests(PaymentAPITestCase):
                 patch('apps.payments.gateway.fetch_payment', return_value={
                     'id': 'pay_1', 'order_id': 'order_test_1',
                     'amount': 14900, 'status': 'captured',
+                    'contact': '+919000090000',
                 }):
             response = self._verify()
 
@@ -216,6 +252,7 @@ class VerifyTests(PaymentAPITestCase):
         purchase.refresh_from_db()
         self.assertEqual(purchase.status, Purchase.STATUS_PAID)
         self.assertEqual(purchase.provider_payment_id, 'pay_1')
+        self.assertEqual(purchase.contact, '+919000090000')
         self.assertIsNotNone(purchase.paid_at)
 
         detail = self.client.get('/api/articles/paid-article/')
@@ -312,6 +349,7 @@ class WebhookTests(PaymentAPITestCase):
             'payload': {'payment': {'entity': {
                 'id': payment_id, 'order_id': order_id,
                 'amount': 14900, 'currency': 'INR', 'status': 'captured',
+                'contact': '+919000090000',
             }}},
         }
 
@@ -331,7 +369,20 @@ class WebhookTests(PaymentAPITestCase):
         purchase.refresh_from_db()
         self.assertEqual(purchase.status, Purchase.STATUS_PAID)
         self.assertEqual(purchase.provider_payment_id, 'pay_1')
+        self.assertEqual(purchase.contact, '+919000090000')
         self.assertTrue(can_read_article(self.reader, self.paid))
+
+    def test_a_capture_after_verify_still_remembers_the_contact(self):
+        """The browser settles first, the webhook arrives second."""
+        purchase = self._purchase(
+            status=Purchase.STATUS_PAID, provider_payment_id='pay_1'
+        )
+        response = self._webhook(self._capture_payload())
+
+        self.assertEqual(response.status_code, 200, response.data)
+        purchase.refresh_from_db()
+        self.assertEqual(purchase.status, Purchase.STATUS_PAID)
+        self.assertEqual(purchase.contact, '+919000090000')
 
     def test_a_bad_signature_is_refused_and_recorded_nowhere(self):
         purchase = self._purchase()
