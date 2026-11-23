@@ -11,7 +11,7 @@ from django.db.models import Q, ProtectedError
 from django.http import Http404, HttpResponse
 from django.utils.text import slugify
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from django_filters.rest_framework import DjangoFilterBackend
 from django_filters.rest_framework.filterset import BooleanFilter, FilterSet
 from apps.chatbot.ingestion import ingest_article
@@ -26,6 +26,7 @@ from .serializers import (
     QuizPayloadSerializer, QuizResultSerializer, QuizSubmissionSerializer,
     QuizGenerationRequestSerializer, QuizGenerationResultSerializer,
     QuizQuestionAdminSerializer, QuizReviewPayloadSerializer,
+    SlugCheckSerializer, unique_article_slug,
 )
 from .quiz_ai import QuizGenerationError, generate_quiz_questions
 
@@ -127,7 +128,7 @@ class ArticleFilterSet(FilterSet):
 
 class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
     ADMIN_ACTIONS = AdminWriteOrReadAnyMixin.ADMIN_ACTIONS + (
-        'reindex', 'generate_quiz', 'quiz_review', 'quiz_review_question',
+        'reindex', 'generate_quiz', 'quiz_review', 'quiz_review_question', 'slug_check',
     )
     # Opt in to the author check, since the mixin is also used by Category and
     # Tag, which have no `author` to compare against.
@@ -251,6 +252,76 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
             serializer.save(author=self.request.user)
         else:
             serializer.save()
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                'slug', OpenApiTypes.STR, OpenApiParameter.QUERY,
+                description='Slug as typed in the editor. Ignored when blank.',
+            ),
+            OpenApiParameter(
+                'title', OpenApiTypes.STR, OpenApiParameter.QUERY,
+                description='Title to slugify when no slug is supplied.',
+            ),
+            OpenApiParameter(
+                'exclude', OpenApiTypes.INT, OpenApiParameter.QUERY,
+                description='Article being edited, whose own slug is not a collision.',
+            ),
+        ],
+        responses={200: SlugCheckSerializer},
+        summary='Preview the slug an article would get',
+        description=(
+            'Answers with the URL a save would produce, which is not always what '
+            'was typed: a collision is disambiguated to `-2`, `-3`, … exactly as '
+            '`ArticleWriteSerializer` does. Staff only — the answer can name '
+            "another author's draft."
+        ),
+    )
+    @action(detail=False, methods=['get'], url_path='slug-check')
+    def slug_check(self, request):
+        """What slug would a save store, and is the typed one free?
+
+        The editor shows this under the title before anything is published. It
+        is an admin action because it reveals the title of an article the caller
+        may not be able to read, and because `AdminWriteOrReadAnyMixin` would
+        otherwise hand an unlisted action to `AllowAny`.
+        """
+        title = (request.query_params.get('title') or '').strip()
+        typed = (request.query_params.get('slug') or '').strip()
+        candidate = typed or slugify(title)[:255]
+        if not candidate:
+            return Response(
+                {'detail': 'A slug or a title is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_exclude = (request.query_params.get('exclude') or '').strip()
+        exclude_pk = int(raw_exclude) if raw_exclude.isdigit() else None
+
+        # Deliberately not `self.get_queryset()`: the database's uniqueness is
+        # global, so a collision with another author's draft is still a
+        # collision, even though this editor cannot open that article.
+        occupant_qs = Article.objects.filter(slug=candidate)
+        if exclude_pk is not None:
+            occupant_qs = occupant_qs.exclude(pk=exclude_pk)
+        occupant = occupant_qs.first()
+
+        if occupant is None:
+            slug = candidate
+        else:
+            # Same rule as the write serializer, so the preview is a promise.
+            slug = unique_article_slug(candidate, exclude_pk=exclude_pk)
+
+        return Response({
+            'candidate': candidate,
+            'slug': slug,
+            'available': occupant is None,
+            'taken_by': None if occupant is None else {
+                'id': occupant.pk,
+                'title': occupant.title,
+                'is_published': occupant.is_published,
+            },
+        })
 
     @extend_schema(
         request=ReactionRequestSerializer,

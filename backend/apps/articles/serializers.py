@@ -427,6 +427,50 @@ class ReactionRequestSerializer(serializers.Serializer):
     value = serializers.ChoiceField(choices=[REACTION_LIKE, REACTION_DISLIKE, REACTION_NONE])
 
 
+def unique_article_slug(candidate, exclude_pk=None):
+    """The one rule for what slug a save will actually store.
+
+    `ArticleWriteSerializer.validate` and the editor's live preview both call
+    this, so the URL the admin shows before saving is the URL the article gets.
+    A collision appends `-2`, `-3`, … rather than failing: a slug is derived
+    from a title, and two articles legitimately sharing a title is not an error.
+    """
+    slug = (candidate or '').strip()
+    if not slug:
+        return ''
+    queryset = Article.objects.filter(slug=slug)
+    if exclude_pk is not None:
+        queryset = queryset.exclude(pk=exclude_pk)
+    if not queryset.exists():
+        return slug
+    base, suffix = slug, 2
+    while Article.objects.filter(slug=f'{base}-{suffix}').exists():
+        suffix += 1
+    return f'{base}-{suffix}'
+
+
+class SlugOccupantSerializer(serializers.Serializer):
+    """The article currently holding a slug, as the editor preview shows it."""
+
+    id = serializers.IntegerField()
+    title = serializers.CharField()
+    is_published = serializers.BooleanField()
+
+
+class SlugCheckSerializer(serializers.Serializer):
+    """Body of `GET /api/articles/slug-check/`.
+
+    `candidate` is what the editor typed (or the title, slugified), `slug` is
+    what a save would actually store, and `taken_by` names the article holding
+    the candidate when the two differ.
+    """
+
+    candidate = serializers.CharField()
+    slug = serializers.CharField()
+    available = serializers.BooleanField()
+    taken_by = SlugOccupantSerializer(allow_null=True)
+
+
 class ArticleWriteSerializer(serializers.ModelSerializer):
     """Staff-facing representation with explicit writable relationships."""
 
@@ -512,15 +556,10 @@ class ArticleWriteSerializer(serializers.ModelSerializer):
         if not slug:
             raise serializers.ValidationError({'slug': 'A slug or a title is required.'})
 
-        queryset = Article.objects.filter(slug=slug)
-        if self.instance is not None:
-            queryset = queryset.exclude(pk=self.instance.pk)
-        if queryset.exists():
-            base, suffix = slug, 2
-            while Article.objects.filter(slug=f'{base}-{suffix}').exists():
-                suffix += 1
-            slug = f'{base}-{suffix}'
-        attrs['slug'] = slug
+        # Shared with `slug_check` so the preview cannot disagree with the save.
+        attrs['slug'] = unique_article_slug(
+            slug, exclude_pk=self.instance.pk if self.instance is not None else None
+        )
         return attrs
 
     def validate_content(self, value):

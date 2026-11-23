@@ -437,6 +437,54 @@
   opacity: 0.6;
 }
 
+/* --- Live slug preview under the title -------------------------------- */
+
+.slug-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3xs) var(--space-2xs);
+  margin-top: var(--space-3xs);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.slug-preview[hidden] {
+  display: none !important;
+}
+
+.slug-preview-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.slug-preview-url {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.slug-preview-status {
+  font-weight: 600;
+}
+
+.slug-preview-status[data-state='ok'] {
+  color: var(--success);
+}
+
+.slug-preview-status[data-state='conflict'] {
+  color: var(--error);
+}
+
+.slug-preview-status[data-state='pending'] {
+  color: var(--text-secondary);
+}
+
 .editor-holder {
   min-height: 24rem;
   padding: var(--space-sm) 0;

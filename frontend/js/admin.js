@@ -937,6 +937,13 @@ function articleFormMarkup(article) {
             <div class="title-field-wrap">
               <label class="field-label" for="f-title">Article Title<span class="field-required" aria-hidden="true">*</span></label>
               <input class="input admin-editor-title-input" id="f-title" name="title" required value="${escapeHtml(article?.title || '')}" placeholder="Article Title…" autocomplete="off" />
+              <!-- The URL a save would produce, before it is produced. The
+                   server's answer is authoritative: a taken slug becomes `-2`. -->
+              <div class="slug-preview" id="slug-preview" hidden>
+                <span class="slug-preview-label">Public URL</span>
+                <code class="slug-preview-url" id="slug-preview-url"></code>
+                <span class="slug-preview-status" id="slug-preview-status" role="status"></span>
+              </div>
             </div>
 
             <div class="field">
@@ -1314,8 +1321,88 @@ function setupArticleFormInteractions(form, article) {
       formIsDirty = true;
       updateSaveIndicator(true);
       scheduleAutosave();
+      scheduleSlugCheck();
     }
   });
+
+  // Live slug preview. Shows the URL a save would store, then asks the server
+  // whether the typed slug is free — the server owns the rule that a collision
+  // becomes `-2`, so this line can only ever repeat that answer, never invent
+  // one. A failed probe therefore falls back to the derived URL silently: this
+  // is a convenience, and a broken preview must not look like a broken save.
+  const slugPreview = document.querySelector('#slug-preview');
+  const slugPreviewUrl = document.querySelector('#slug-preview-url');
+  const slugPreviewStatus = document.querySelector('#slug-preview-status');
+  let slugCheckTimer = null;
+  let slugCheckToken = 0;
+
+  function slugCandidate() {
+    const typed = (form.slug?.value || '').trim();
+    if (typed) return typed;
+    return slugify((form.title?.value || '').trim());
+  }
+
+  function renderSlugPreview({ candidate, slug, available, takenBy } = {}) {
+    if (!slugPreview) return;
+    if (!candidate) {
+      slugPreview.hidden = true;
+      return;
+    }
+    slugPreview.hidden = false;
+    if (slugPreviewUrl) {
+      slugPreviewUrl.textContent = `/article.html?slug=${slug || candidate}`;
+    }
+    if (!slugPreviewStatus) return;
+    if (available === undefined) {
+      slugPreviewStatus.dataset.state = 'pending';
+      slugPreviewStatus.textContent = 'Checking…';
+    } else if (available) {
+      slugPreviewStatus.dataset.state = 'ok';
+      slugPreviewStatus.textContent = 'Available';
+    } else {
+      slugPreviewStatus.dataset.state = 'conflict';
+      slugPreviewStatus.textContent = takenBy
+        ? `Taken by “${takenBy.title}”${takenBy.is_published ? '' : ' (draft)'} — saving will use ${slug}`
+        : `Will save as ${slug}`;
+    }
+  }
+
+  async function checkSlug() {
+    const candidate = slugCandidate();
+    if (!candidate) {
+      renderSlugPreview();
+      return;
+    }
+    const token = ++slugCheckToken;
+    const params = new URLSearchParams({ slug: candidate });
+    if (article?.id) params.set('exclude', String(article.id));
+    try {
+      const result = await apiFetch(`/articles/slug-check/?${params.toString()}`);
+      // A newer keystroke owns the line: an older answer must not overwrite it.
+      if (token !== slugCheckToken) return;
+      renderSlugPreview({
+        candidate: result.candidate,
+        slug: result.slug,
+        available: result.available,
+        takenBy: result.taken_by,
+      });
+    } catch (error) {
+      if (token !== slugCheckToken) return;
+      console.warn('Slug preview unavailable', error);
+      renderSlugPreview({ candidate });
+    }
+  }
+
+  function scheduleSlugCheck() {
+    // Paint the unverified URL at once so the line never lags behind typing.
+    renderSlugPreview({ candidate: slugCandidate() });
+    clearTimeout(slugCheckTimer);
+    slugCheckTimer = setTimeout(checkSlug, 350);
+  }
+
+  form.title?.addEventListener('input', scheduleSlugCheck);
+  form.slug?.addEventListener('input', scheduleSlugCheck);
+  scheduleSlugCheck();
 
   // Auto-excerpt
   document.querySelector('#btn-auto-excerpt')?.addEventListener('click', async () => {

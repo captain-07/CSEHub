@@ -5,6 +5,7 @@ actually carry, and so the request bodies are validated before any provider call
 is made.
 """
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import Purchase
@@ -59,6 +60,14 @@ class PaymentStatusSerializer(serializers.Serializer):
     detail = serializers.CharField(required=False)
 
 
+class PurchasedCategorySerializer(serializers.Serializer):
+    """The category a purchased article belongs to. `null` when it has none."""
+
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    slug = serializers.CharField()
+
+
 class MyPurchasesSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(source='article.id')
     slug = serializers.CharField(source='article.slug')
@@ -72,6 +81,7 @@ class MyPurchasesSerializer(serializers.ModelSerializer):
         model = Purchase
         fields = ['id', 'slug', 'title', 'excerpt', 'price', 'category', 'purchased_at']
 
+    @extend_schema_field(PurchasedCategorySerializer(allow_null=True))
     def get_category(self, obj):
         cat = obj.article.category
         if not cat:

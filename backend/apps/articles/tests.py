@@ -1000,3 +1000,112 @@ class ArticleVideoTests(APITestCase):
         row = self.client.get('/api/articles/').data['results'][0]
         self.assertEqual(row['video_url'], 'https://vimeo.com/123456789')
 
+
+class SlugCheckTests(APITestCase):
+    """The editor's live slug preview.
+
+    What matters is that this endpoint and `ArticleWriteSerializer.validate`
+    cannot drift: the preview is only useful if the URL it prints is the URL a
+    save stores, including the `-2` disambiguation.
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        self.staff = User.objects.create_user(
+            email='staff@example.com', username='staff', password='password', is_staff=True
+        )
+        self.reader = User.objects.create_user(
+            email='reader@example.com', username='reader', password='password'
+        )
+        self.published = Article.objects.create(
+            title='Graph Traversal', slug='graph-traversal',
+            content={'blocks': []}, is_published=True,
+        )
+        self.draft = Article.objects.create(
+            title='Hidden Draft', slug='hidden-draft',
+            content={'blocks': []}, is_published=False,
+        )
+
+    def check(self, **params):
+        return self.client.get('/api/articles/slug-check/', params)
+
+    def test_a_signed_out_caller_is_refused(self):
+        response = self.check(slug='anything')
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_a_non_staff_reader_is_refused(self):
+        """The answer can name another author's draft, so readers cannot ask."""
+        self.client.force_authenticate(self.reader)
+        response = self.check(slug='hidden-draft')
+        self.assertEqual(response.status_code, 403)
+
+    def test_a_free_slug_is_reported_available(self):
+        self.client.force_authenticate(self.staff)
+        response = self.check(slug='brand-new')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['slug'], 'brand-new')
+        self.assertTrue(response.data['available'])
+        self.assertIsNone(response.data['taken_by'])
+
+    def test_a_taken_slug_is_disambiguated_like_a_save_would(self):
+        self.client.force_authenticate(self.staff)
+        response = self.check(slug='graph-traversal')
+
+        self.assertFalse(response.data['available'])
+        self.assertEqual(response.data['slug'], 'graph-traversal-2')
+        self.assertEqual(response.data['taken_by']['id'], self.published.pk)
+        self.assertEqual(response.data['taken_by']['title'], 'Graph Traversal')
+        self.assertTrue(response.data['taken_by']['is_published'])
+
+    def test_a_draft_holds_its_slug_too(self):
+        """Uniqueness is global; a draft is invisible to readers but still real."""
+        self.client.force_authenticate(self.staff)
+        response = self.check(slug='hidden-draft')
+
+        self.assertFalse(response.data['available'])
+        self.assertFalse(response.data['taken_by']['is_published'])
+
+    def test_suffixes_walk_until_one_is_free(self):
+        Article.objects.create(
+            title='Second', slug='graph-traversal-2', content={'blocks': []}, is_published=True
+        )
+        self.client.force_authenticate(self.staff)
+        response = self.check(slug='graph-traversal')
+
+        self.assertEqual(response.data['slug'], 'graph-traversal-3')
+
+    def test_the_editor_can_exclude_the_article_it_is_editing(self):
+        self.client.force_authenticate(self.staff)
+        response = self.check(slug='graph-traversal', exclude=self.published.pk)
+
+        self.assertTrue(response.data['available'])
+        self.assertEqual(response.data['slug'], 'graph-traversal')
+
+    def test_a_title_is_slugified_when_no_slug_is_given(self):
+        self.client.force_authenticate(self.staff)
+        response = self.check(title='Dijkstra’s Algorithm, Explained')
+
+        self.assertEqual(response.data['candidate'], 'dijkstras-algorithm-explained')
+        self.assertEqual(response.data['slug'], 'dijkstras-algorithm-explained')
+
+    def test_nothing_to_slugify_is_a_field_error(self):
+        self.client.force_authenticate(self.staff)
+        response = self.check()
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_preview_matches_what_the_write_serializer_stores(self):
+        """The whole point of the endpoint: never a nicer promise than reality."""
+        self.client.force_authenticate(self.staff)
+        preview = self.check(slug='graph-traversal').data['slug']
+
+        created = self.client.post('/api/articles/', {
+            'title': 'Graph Traversal',
+            'slug': 'graph-traversal',
+            'content': {'blocks': []},
+        }, format='json')
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data['slug'], preview)
+
