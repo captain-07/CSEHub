@@ -303,6 +303,9 @@ class QuizQuestionPublicSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     prompt = serializers.CharField()
     options = QuizOptionSerializer(many=True)
+    # A label only: `beginner` / `intermediate` / `advanced`. It carries no
+    # answer information, so it is safe to send before grading.
+    difficulty = serializers.CharField()
 
 
 class QuizPayloadSerializer(serializers.Serializer):
@@ -374,7 +377,8 @@ class QuizQuestionAdminSerializer(serializers.ModelSerializer):
         model = QuizQuestion
         fields = [
             'id', 'prompt', 'option_a', 'option_b', 'option_c', 'option_d',
-            'correct_option', 'explanation', 'source', 'ai_model', 'is_active',
+            'correct_option', 'explanation', 'difficulty', 'source', 'ai_model',
+            'is_active',
         ]
         read_only_fields = ['id', 'source', 'ai_model']
 

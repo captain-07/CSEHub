@@ -753,6 +753,7 @@ QUIZ_QUESTIONS = {
                 'The solution stores each value it has seen in a hash map, so the '
                 'complement of the current number can be looked up in constant time.'
             ),
+            'difficulty': 'beginner',
         },
         {
             'prompt': 'What does the hash map hold for each number that has been seen?',
@@ -762,6 +763,7 @@ QUIZ_QUESTIONS = {
                 'The map is keyed by the number and stores its index, because the '
                 'answer is a pair of indices rather than the values themselves.'
             ),
+            'difficulty': 'intermediate',
         },
         {
             'prompt': 'What is the time complexity of the one-pass hash map solution?',
@@ -771,6 +773,7 @@ QUIZ_QUESTIONS = {
                 'Each element is visited once and each hash map lookup is O(1) on '
                 'average, so the whole pass is O(n).'
             ),
+            'difficulty': 'beginner',
         },
         {
             'prompt': 'Why does the solution check the map before inserting the current number?',
@@ -785,6 +788,7 @@ QUIZ_QUESTIONS = {
                 'Checking first means the current number cannot be paired with '
                 'itself; the match must come from an earlier index.'
             ),
+            'difficulty': 'advanced',
         },
         {
             'prompt': 'What is the space complexity of the solution?',
@@ -794,6 +798,7 @@ QUIZ_QUESTIONS = {
                 'In the worst case the map holds every number before the pair is '
                 'found, which grows linearly with the input.'
             ),
+            'difficulty': 'intermediate',
         },
     ],
     'binary-search-boundaries': [
@@ -1270,6 +1275,9 @@ class Command(BaseCommand):
                         'option_d': options[3],
                         'correct_option': spec['correct'],
                         'explanation': spec.get('explanation', ''),
+                        # Unlabelled seed questions stay neutral rather than
+                        # claiming to be easy.
+                        'difficulty': spec.get('difficulty', QuizQuestion.DIFFICULTY_INTERMEDIATE),
                     },
                 )
 

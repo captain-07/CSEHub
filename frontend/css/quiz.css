@@ -191,6 +191,53 @@ body.quiz-open {
   min-width: 0;
 }
 
+/* Difficulty badge: a label for the reader, placed above the options so it
+   cannot squeeze the question text on a narrow screen. */
+.quiz-question-meta {
+  margin: -0.4rem 0 0.7rem;
+}
+
+.quiz-difficulty {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.quiz-difficulty[data-difficulty='beginner'] {
+  color: var(--success);
+  background-color: var(--success-soft);
+}
+
+.quiz-difficulty[data-difficulty='intermediate'] {
+  color: var(--warning);
+  background-color: var(--warning-soft);
+}
+
+.quiz-difficulty[data-difficulty='advanced'] {
+  color: var(--error);
+  background-color: var(--error-soft);
+}
+
+/* This browser's running total, on the card and under the score. */
+.quiz-tally {
+  margin: 0.9rem 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.quiz-tally[hidden] {
+  display: none !important;
+}
+
+.quiz-result-tally {
+  margin: 0 0 1rem;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
 .quiz-options {
   display: grid;
   gap: 0.5rem;

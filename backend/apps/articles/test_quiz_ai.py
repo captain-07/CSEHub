@@ -47,6 +47,7 @@ def make_draft(
     correct_index=0,
     evidence='A hash map stores key-value pairs and gives average O(1) lookup time.',
     explanation='The article states that lookup is O(1) on average.',
+    difficulty='intermediate',
 ):
     return DraftQuestion(
         prompt=prompt,
@@ -54,6 +55,7 @@ def make_draft(
         correct_index=correct_index,
         explanation=explanation,
         evidence=evidence,
+        difficulty=difficulty,
     )
 
 
@@ -75,6 +77,40 @@ class QuizGenerationServiceTests(TestCase):
         self.assertEqual(question.source, QuizQuestion.SOURCE_AI)
         self.assertEqual(question.ai_model, CONFIGURED_MODEL)
         self.assertFalse(question.is_active)
+
+    def test_the_models_difficulty_is_stored(self):
+        with patch(
+            'apps.articles.quiz_ai.draft_questions',
+            return_value=[make_draft(difficulty='advanced')],
+        ):
+            generate_quiz_questions(self.article)
+
+        self.assertEqual(
+            self.article.quiz_questions.get().difficulty,
+            QuizQuestion.DIFFICULTY_ADVANCED,
+        )
+
+    def test_an_unrecognised_difficulty_falls_back_to_intermediate(self):
+        """A badge is not worth rejecting a good question over."""
+        with patch(
+            'apps.articles.quiz_ai.draft_questions',
+            return_value=[make_draft(difficulty='fiendishly hard')],
+        ):
+            created, rejected = generate_quiz_questions(self.article)
+
+        self.assertEqual(rejected, 0)
+        self.assertEqual(created[0].difficulty, QuizQuestion.DIFFICULTY_INTERMEDIATE)
+
+    def test_an_unlabelled_draft_still_gets_a_badge(self):
+        draft = make_draft()
+        draft.difficulty = ''
+        with patch('apps.articles.quiz_ai.draft_questions', return_value=[draft]):
+            generate_quiz_questions(self.article)
+
+        self.assertEqual(
+            self.article.quiz_questions.get().difficulty,
+            QuizQuestion.DIFFICULTY_INTERMEDIATE,
+        )
 
     def test_activate_makes_the_rows_reader_visible(self):
         with patch(

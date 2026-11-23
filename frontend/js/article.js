@@ -802,6 +802,9 @@ async function initArticle() {
                 </p>
               </div>
               <button class="button button-primary" type="button" id="quiz-start">Start quiz</button>
+              <!-- Filled by quiz.js from this browser's own attempts. Local and
+                   silent when empty: there is no attempt table behind it. -->
+              <p class="quiz-tally" id="quiz-tally" hidden></p>
             </section>
 
             <dialog class="quiz-modal" id="quiz-modal" aria-labelledby="quiz-modal-title" aria-describedby="quiz-modal-subtitle">

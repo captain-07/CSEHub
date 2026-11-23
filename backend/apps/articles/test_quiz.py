@@ -66,6 +66,27 @@ class QuizAPITests(APITestCase):
         for option in question['options']:
             self.assertNotIn('is_correct', option)
 
+    def test_quiz_payload_carries_the_difficulty_badge(self):
+        """The badge is a label, not the answer key: it is safe before grading."""
+        self.make_question(difficulty=QuizQuestion.DIFFICULTY_ADVANCED)
+
+        response = self.client.get(self.quiz_url())
+
+        self.assertEqual(
+            response.data['questions'][0]['difficulty'],
+            QuizQuestion.DIFFICULTY_ADVANCED,
+        )
+
+    def test_an_unlabelled_question_is_neither_claimed_easy_nor_hard(self):
+        self.make_question()
+
+        response = self.client.get(self.quiz_url())
+
+        self.assertEqual(
+            response.data['questions'][0]['difficulty'],
+            QuizQuestion.DIFFICULTY_INTERMEDIATE,
+        )
+
     def test_quiz_returns_a_random_subset_of_at_most_five(self):
         bank = [
             self.make_question(prompt=f'Question {index}')
@@ -411,6 +432,7 @@ class QuizReviewAPITests(APITestCase):
                 'option_d': 'Depth-first search',
                 'correct_option': 0,
                 'explanation': 'A hash map has average O(1) lookup.',
+                'difficulty': 'beginner',
                 'is_active': True,
             },
             format='json',
@@ -420,6 +442,7 @@ class QuizReviewAPITests(APITestCase):
         question.refresh_from_db()
         self.assertEqual(question.prompt, 'Which is O(1) on average?')
         self.assertEqual(question.correct_option, 0)
+        self.assertEqual(question.difficulty, QuizQuestion.DIFFICULTY_BEGINNER)
         self.assertTrue(question.is_active)
 
         # Activation is what moves a reviewed question into the reader bank.
@@ -556,10 +579,22 @@ class SeedQuizTests(TestCase):
 
         questions = QuizQuestion.objects.filter(article__slug='two-sum-explained')
         self.assertTrue(questions.exists())
+        valid_difficulties = {value for value, _ in QuizQuestion.DIFFICULTY_CHOICES}
         for question in questions:
             for field in QuizQuestion.OPTION_FIELDS:
                 self.assertTrue(getattr(question, field).strip())
             self.assertIn(question.correct_option, range(4))
+            self.assertIn(question.difficulty, valid_difficulties)
+
+    def test_seeded_questions_are_not_all_the_same_difficulty(self):
+        """A quiz where every badge says the same thing teaches the reader nothing."""
+        call_command('seed', stdout=StringIO(), stderr=StringIO())
+
+        difficulties = set(
+            QuizQuestion.objects.filter(article__slug='two-sum-explained')
+            .values_list('difficulty', flat=True)
+        )
+        self.assertGreater(len(difficulties), 1)
 
     def test_reseeding_does_not_duplicate_questions(self):
         call_command('seed', stdout=StringIO(), stderr=StringIO())

@@ -485,6 +485,10 @@
   color: var(--text-secondary);
 }
 
+.quiz-review-difficulty {
+  max-width: 14rem;
+}
+
 .editor-holder {
   min-height: 24rem;
   padding: var(--space-sm) 0;

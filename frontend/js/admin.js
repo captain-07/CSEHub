@@ -1737,6 +1737,13 @@ async function reindex(article) {
 
 const QUIZ_OPTION_FIELDS = ['option_a', 'option_b', 'option_c', 'option_d'];
 const QUIZ_OPTION_LETTERS = ['A', 'B', 'C', 'D'];
+// Mirrors `QuizQuestion.DIFFICULTY_CHOICES`; the reader sees the label, the API
+// stores the value.
+const QUIZ_DIFFICULTIES = [
+  ['beginner', 'Beginner'],
+  ['intermediate', 'Intermediate'],
+  ['advanced', 'Advanced'],
+];
 
 function setQuizReviewStatus(modal, text, kind = 'info') {
   const el = modal.querySelector('#quiz-review-status');
@@ -1811,6 +1818,15 @@ function quizQuestionCardMarkup(question, index) {
       <label class="field">
         <span class="field-label">Question</span>
         <textarea class="textarea" data-field="prompt" rows="2">${escapeHtml(question.prompt)}</textarea>
+      </label>
+
+      <label class="field quiz-review-difficulty">
+        <span class="field-label">Difficulty</span>
+        <select class="select" data-field="difficulty">
+          ${QUIZ_DIFFICULTIES.map(([value, label]) => `
+            <option value="${value}" ${question.difficulty === value ? 'selected' : ''}>${label}</option>
+          `).join('')}
+        </select>
       </label>
 
       <fieldset class="quiz-review-options">
@@ -1907,6 +1923,7 @@ function collectQuizQuestionPayload(card) {
     option_d: options[3],
     correct_option: Number(selected.value),
     explanation,
+    difficulty: value('difficulty') || 'intermediate',
   };
 }
 

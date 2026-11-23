@@ -498,6 +498,7 @@ class ArticleViewSet(AdminWriteOrReadAnyMixin, viewsets.ModelViewSet):
                 'id': question.id,
                 'prompt': question.prompt,
                 'options': options,
+                'difficulty': question.difficulty,
             })
 
         return Response({'questions': payload, 'total': len(payload)})

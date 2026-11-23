@@ -93,7 +93,7 @@ class QuizQuestionAdmin(admin.ModelAdmin):
     missing or duplicate option, because the admin form runs `full_clean()`.
     """
 
-    list_display = ['prompt', 'article', 'source', 'correct_option', 'is_active', 'created_at']
+    list_display = ['prompt', 'article', 'source', 'difficulty', 'correct_option', 'is_active', 'created_at']
     list_filter = ['source', 'is_active']
     list_editable = ['is_active']
     search_fields = ['prompt', 'article__title']
