@@ -13,6 +13,7 @@ import { escapeHtml, renderAssistantMarkup } from './renderer.js';
 
 let activeArticleSlug = null;
 let activeArticleTitle = '';
+let activeArticleCategory = '';
 let busy = false;
 /** Element to hand focus back to when the drawer closes. */
 let previouslyFocused = null;
@@ -23,6 +24,7 @@ export async function openChatForArticle(slug, title, options = {}) {
 
   activeArticleSlug = slug;
   activeArticleTitle = title;
+  activeArticleCategory = typeof options === 'object' && options.category ? options.category : '';
 
   const question = typeof options === 'string' ? options : (options.question || '');
   const autoSend = typeof options === 'object' && Boolean(options.autoSend);
@@ -176,19 +178,38 @@ function scrollToBottom() {
 function bindChatCodeBlocks(root) {
   root.querySelectorAll('.chat-copy-code-btn').forEach((button) => {
     button.addEventListener('click', async () => {
-      const original = button.textContent;
+      if (button.classList.contains('is-copied')) return;
+      const original = button.dataset.label || button.textContent;
+      button.dataset.label = original;
+      const code = decodeURIComponent(button.dataset.code || '');
       try {
-        await navigator.clipboard.writeText(decodeURIComponent(button.dataset.code || ''));
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(code);
+        } else {
+          const scratch = document.createElement('textarea');
+          scratch.value = code;
+          scratch.style.position = 'fixed';
+          scratch.style.opacity = '0';
+          document.body.appendChild(scratch);
+          scratch.select();
+          document.execCommand('copy');
+          scratch.remove();
+        }
         button.textContent = 'Copied!';
         button.classList.add('is-copied');
+        clearTimeout(button._copyTimeout);
+        button._copyTimeout = setTimeout(() => {
+          button.textContent = original;
+          button.classList.remove('is-copied');
+        }, 2000);
       } catch (err) {
         console.error('Failed to copy chat code to clipboard', err);
         button.textContent = 'Press Ctrl+C';
+        clearTimeout(button._copyTimeout);
+        button._copyTimeout = setTimeout(() => {
+          button.textContent = original;
+        }, 2000);
       }
-      setTimeout(() => {
-        button.textContent = original;
-        button.classList.remove('is-copied');
-      }, 2000);
     });
   });
 
@@ -205,6 +226,32 @@ function bindChatCodeBlocks(root) {
       // Keep plain code on parse error
     }
   });
+}
+
+function getContextualSuggestions(category = '') {
+  const cat = String(category || '').toLowerCase();
+  if (cat.includes('algorithm') || cat.includes('dsa') || cat.includes('data structure') || cat.includes('tree') || cat.includes('graph')) {
+    return [
+      { label: '💡 Core intuition', question: 'Explain the core intuition of this topic simply' },
+      { label: '⏱️ Complexity & edge cases', question: 'What are the time/space complexities and common edge cases?' },
+      { label: '🧪 Step-by-step trace', question: 'Can you walk through a step-by-step trace on a sample input?' },
+      { label: '💻 Alternative approaches', question: 'What are common alternative approaches and their trade-offs?' },
+    ];
+  }
+  if (cat.includes('system') || cat.includes('database') || cat.includes('network') || cat.includes('os') || cat.includes('distribut')) {
+    return [
+      { label: '💡 Core intuition', question: 'Explain the core intuition of this topic simply' },
+      { label: '⚖️ Architectural trade-offs', question: 'What are the key architectural trade-offs and bottleneck risks?' },
+      { label: '🛡️ Failure recovery', question: 'How does this handle failures, partitions, or node crashes?' },
+      { label: '💻 Practical example', question: 'Can you give a real-world production or industry example?' },
+    ];
+  }
+  return [
+    { label: '💡 Core intuition', question: 'Explain the core intuition of this topic simply' },
+    { label: '⏱️ Complexity breakdown', question: 'What are the time and space complexity trade-offs?' },
+    { label: '🧪 Quiz me', question: 'Quiz me on this concept with 2 practice questions' },
+    { label: '💻 Practical code example', question: 'Can you give a practical code example?' },
+  ];
 }
 
 function bindSuggestionChips(root) {
@@ -274,6 +321,7 @@ async function loadConversationHistory() {
     container.innerHTML = '';
 
     if (!history?.messages?.length) {
+      const suggestions = getContextualSuggestions(activeArticleCategory);
       container.innerHTML = `
         <div class="chat-message assistant">
           <div>
@@ -285,10 +333,9 @@ async function loadConversationHistory() {
         <div class="chat-suggestions" aria-label="Suggested questions">
           <p class="chat-suggestions-title">Suggested questions</p>
           <div class="chat-suggestions-list">
-            <button type="button" class="chat-suggestion-chip" data-question="Explain the core intuition of this topic simply">💡 Core intuition</button>
-            <button type="button" class="chat-suggestion-chip" data-question="What are the time and space complexity trade-offs?">⏱️ Complexity breakdown</button>
-            <button type="button" class="chat-suggestion-chip" data-question="Quiz me on this concept with 2 practice questions">🧪 Quiz me</button>
-            <button type="button" class="chat-suggestion-chip" data-question="Can you give a practical code example?">💻 Practical code example</button>
+            ${suggestions.map((item) => `
+              <button type="button" class="chat-suggestion-chip" data-question="${escapeHtml(item.question)}">${escapeHtml(item.label)}</button>
+            `).join('')}
           </div>
         </div>`;
       bindSuggestionChips(container);
@@ -328,6 +375,7 @@ async function handleSendMessage() {
   input.value = '';
   input.disabled = true;
   sendBtn.disabled = true;
+  sendBtn.setAttribute('aria-busy', 'true');
   showTypingIndicator();
 
   try {
@@ -353,6 +401,7 @@ async function handleSendMessage() {
     busy = false;
     input.disabled = false;
     sendBtn.disabled = false;
+    sendBtn.removeAttribute('aria-busy');
     input.focus();
     scrollToBottom();
   }

@@ -176,6 +176,37 @@
 
 .search-field input {
   padding-left: 2.5rem;
+  padding-right: 2.2rem;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  z-index: 2;
+}
+
+.search-clear-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--border);
+}
+
+.search-clear-btn[hidden] {
+  display: none !important;
 }
 
 /* ── Results header ──────────────────────────────────────────── */

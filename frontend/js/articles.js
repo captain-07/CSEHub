@@ -114,16 +114,6 @@ function emptyStateMarkup(filters) {
   });
 }
 
-function failureMarkup(message) {
-  return `
-    <div class="empty-state" role="alert">
-      <span class="empty-state-icon" aria-hidden="true">📡</span>
-      <h2>Unable to load articles</h2>
-      <p>${escapeHtml(message)}</p>
-      <button class="button button-primary" id="retry-btn" type="button">Try again</button>
-    </div>`;
-}
-
 /** Fills a <select> and selects the current value. */
 function populateSelect(select, items, currentValue, allLabel, valueKey = 'slug', labelKey = 'name') {
   if (!select) return;
@@ -259,8 +249,13 @@ async function renderLibrary(filters, { requestToken, contentArea, filterForm } 
   } catch (error) {
     console.error('Failed to load library data:', error);
     if (token !== requestToken.value || !contentArea) return;
-    contentArea.innerHTML = failureMarkup(friendlyError(error));
-    document.querySelector('#retry-btn')?.addEventListener('click', () => {
+    contentArea.innerHTML = messageStateMarkup({
+      title: 'Unable to load articles',
+      message: friendlyError(error),
+      icon: '📡',
+      retry: true,
+    });
+    contentArea.querySelector('[data-retry]')?.addEventListener('click', () => {
       renderLibrary(readFilters(), { requestToken, contentArea, filterForm });
     });
   }
@@ -275,6 +270,8 @@ function syncFilterForm(filterForm, filters) {
   if (document.activeElement !== search && search.value !== filters.search) {
     search.value = filters.search;
   }
+  const searchClear = filterForm.querySelector('.search-clear-btn');
+  if (searchClear) searchClear.hidden = !search.value;
   filterForm.elements.ordering.value = filters.ordering;
   filterForm.elements.category.value = filters.category || '';
   filterForm.elements.tag.value = filters.tag || '';
@@ -308,12 +305,31 @@ function initLibrary() {
   };
 
   if (filterForm) {
+    const searchInput = filterForm.elements.search;
+    const searchClear = filterForm.querySelector('.search-clear-btn');
+    const syncClearBtn = () => {
+      if (searchClear) searchClear.hidden = !searchInput.value;
+    };
+    syncClearBtn();
+
+    searchClear?.addEventListener('click', () => {
+      searchInput.value = '';
+      syncClearBtn();
+      searchInput.focus();
+      applyFilters({ search: '' }, { replace: Boolean(readFilters().search) });
+    });
+
     // A search field is more useful submitting itself than requiring a click,
     // but only after a pause so each keystroke is not a request.
     let searchTimer = null;
-    filterForm.elements.search.addEventListener('input', (event) => {
+    searchInput.addEventListener('input', (event) => {
+      syncClearBtn();
       clearTimeout(searchTimer);
       const value = event.target.value;
+      if (!value.trim()) {
+        applyFilters({ search: '' }, { replace: Boolean(readFilters().search) });
+        return;
+      }
       searchTimer = setTimeout(
         () => applyFilters({ search: value.trim() }, { replace: Boolean(readFilters().search) }),
         450,

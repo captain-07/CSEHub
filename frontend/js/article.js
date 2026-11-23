@@ -14,19 +14,22 @@ import { initPdfDownload } from './download.js';
 import { initShare } from './share.js';
 import { showToast } from './toast.js';
 
+let updateReadingProgress = null;
+
 /** Wire up the thin reading-progress bar that tracks scroll position. */
 function initReadingProgress() {
   const bar = document.getElementById('reading-progress');
   if (!bar) return;
   function update() {
-    const el = document.querySelector('.article-content') || document.documentElement;
     const scrollTop = window.scrollY || document.documentElement.scrollTop;
     const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-    const progress = docHeight > 0 ? Math.min(100, (scrollTop / docHeight) * 100) : 0;
+    const progress = docHeight > 0 ? Math.min(100, Math.max(0, (scrollTop / docHeight) * 100)) : 0;
     bar.style.width = `${progress}%`;
     bar.setAttribute('aria-valuenow', String(Math.round(progress)));
   }
+  updateReadingProgress = update;
   window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', update, { passive: true });
   update();
 }
 
@@ -47,6 +50,7 @@ function initTableOfContents(shell) {
 
   const links = headings.map((heading, index) => {
     if (!heading.id) heading.id = `section-${index + 1}`;
+    heading.setAttribute('tabindex', '-1');
     return { id: heading.id, text: heading.textContent.trim() || `Section ${index + 1}` };
   });
 
@@ -59,6 +63,16 @@ function initTableOfContents(shell) {
         ${links.map((link) => `<li><a href="#${link.id}">${escapeHtml(link.text)}</a></li>`).join('')}
       </ul>
     </nav>`;
+
+  aside.addEventListener('click', (event) => {
+    const anchor = event.target.closest('a[href^="#"]');
+    if (!anchor) return;
+    const targetId = anchor.getAttribute('href').slice(1);
+    const targetEl = document.getElementById(targetId);
+    if (targetEl) {
+      targetEl.focus({ preventScroll: true });
+    }
+  });
   // Inserted *before* the <article>: the rail renders on the left, so this
   // keeps the DOM order (and therefore the tab order) matching what is seen.
   articleEl.before(aside);
@@ -215,16 +229,45 @@ function applyDocumentMeta(article) {
   const title = `${article.title} — CSEHub`;
   document.title = title;
 
-  const setMeta = (selector, value) => {
-    const tag = document.querySelector(selector);
+  const setMeta = (nameOrProperty, value, isProperty = false) => {
+    const attr = isProperty ? 'property' : 'name';
+    let tag = document.querySelector(`meta[${attr}="${nameOrProperty}"]`);
+    if (!tag && value) {
+      tag = document.createElement('meta');
+      tag.setAttribute(attr, nameOrProperty);
+      document.head.appendChild(tag);
+    }
     if (tag && value) tag.setAttribute('content', value);
   };
 
-  setMeta('meta[name="description"]', article.excerpt || contentToPlainText(article.content, 160));
-  setMeta('meta[property="og:title"]', title);
-  setMeta('meta[property="og:type"]', 'article');
-  setMeta('meta[property="og:description"]', article.excerpt || contentToPlainText(article.content, 160));
-  if (safeUrl(article.featured_image)) setMeta('meta[property="og:image"]', article.featured_image);
+  const excerpt = article.excerpt || contentToPlainText(article.content, 160);
+  const image = safeUrl(article.featured_image);
+
+  setMeta('description', excerpt);
+  setMeta('og:site_name', 'CSEHub', true);
+  setMeta('og:title', title, true);
+  setMeta('og:type', 'article', true);
+  setMeta('og:description', excerpt, true);
+  if (image) setMeta('og:image', image, true);
+
+  // Twitter / X cards
+  setMeta('twitter:card', image ? 'summary_large_image' : 'summary');
+  setMeta('twitter:title', title);
+  setMeta('twitter:description', excerpt);
+  if (image) setMeta('twitter:image', image);
+
+  // Canonical link
+  let canonical = document.querySelector('link[rel="canonical"]');
+  if (!canonical) {
+    canonical = document.createElement('link');
+    canonical.setAttribute('rel', 'canonical');
+    document.head.appendChild(canonical);
+  }
+  const canonicalUrl = new URL(window.location.href);
+  canonicalUrl.search = '';
+  canonicalUrl.hash = '';
+  if (article.slug) canonicalUrl.searchParams.set('slug', article.slug);
+  canonical.setAttribute('href', canonicalUrl.toString());
 }
 
 function relatedMarkup(related) {
@@ -250,19 +293,108 @@ function relatedMarkup(related) {
 function bindCopyButtons(root) {
   root.querySelectorAll('.copy-button').forEach((button) => {
     button.addEventListener('click', async () => {
-      const original = button.textContent;
+      if (button.classList.contains('is-copied')) return;
+      const original = button.dataset.label || button.textContent;
+      button.dataset.label = original;
+      const code = decodeURIComponent(button.dataset.code || '');
       try {
-        await navigator.clipboard.writeText(decodeURIComponent(button.dataset.code || ''));
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(code);
+        } else {
+          const scratch = document.createElement('textarea');
+          scratch.value = code;
+          scratch.style.position = 'fixed';
+          scratch.style.opacity = '0';
+          document.body.appendChild(scratch);
+          scratch.select();
+          document.execCommand('copy');
+          scratch.remove();
+        }
         button.textContent = 'Copied!';
         button.classList.add('is-copied');
+        clearTimeout(button._copyTimeout);
+        button._copyTimeout = setTimeout(() => {
+          button.textContent = original;
+          button.classList.remove('is-copied');
+        }, 2000);
       } catch (err) {
         console.error('Failed to copy code to clipboard', err);
         button.textContent = 'Press Ctrl+C';
+        clearTimeout(button._copyTimeout);
+        button._copyTimeout = setTimeout(() => {
+          button.textContent = original;
+        }, 2000);
       }
-      setTimeout(() => {
-        button.textContent = original;
-        button.classList.remove('is-copied');
-      }, 2000);
+    });
+  });
+}
+
+const READING_SIZE_KEY = 'csehub-reading-size';
+
+function initReadingSize(shell) {
+  const content = shell.querySelector('.article-content');
+  const controls = shell.querySelector('.reading-controls');
+  if (!content || !controls) return;
+
+  let currentSize = 'normal';
+  try {
+    currentSize = localStorage.getItem(READING_SIZE_KEY) || 'normal';
+  } catch {
+    /* storage unavailable */
+  }
+
+  content.setAttribute('data-reading-size', currentSize);
+
+  const syncButtons = (size) => {
+    controls.querySelectorAll('.reading-size-btn').forEach((btn) => {
+      const active = btn.dataset.size === size;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+  };
+
+  syncButtons(currentSize);
+
+  controls.querySelectorAll('.reading-size-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const size = btn.dataset.size || 'normal';
+      content.setAttribute('data-reading-size', size);
+      syncButtons(size);
+      try {
+        localStorage.setItem(READING_SIZE_KEY, size);
+      } catch {
+        /* storage unavailable */
+      }
+      if (updateReadingProgress) updateReadingProgress();
+    });
+  });
+}
+
+function enhanceCodeSnippets(shell) {
+  shell.querySelectorAll('.snippet').forEach((snippet) => {
+    const code = snippet.querySelector('pre code');
+    if (!code) return;
+    const lines = (code.textContent || '').split('\n').length;
+    if (lines <= 35) return;
+
+    snippet.classList.add('snippet-collapsible');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'snippet-expand-btn';
+    btn.setAttribute('aria-expanded', 'false');
+    btn.innerHTML = `<span class="snippet-expand-text">Show full snippet (${lines} lines)</span>`;
+    snippet.appendChild(btn);
+
+    btn.addEventListener('click', () => {
+      const isExpanded = snippet.classList.toggle('is-expanded');
+      btn.setAttribute('aria-expanded', String(isExpanded));
+      const textSpan = btn.querySelector('.snippet-expand-text');
+      if (textSpan) {
+        textSpan.textContent = isExpanded
+          ? 'Show fewer lines'
+          : `Show full snippet (${lines} lines)`;
+      }
+      if (updateReadingProgress) updateReadingProgress();
     });
   });
 }
@@ -643,6 +775,11 @@ async function initArticle() {
               </button>
               ${article.is_paid && article.has_access ? `
                 <button class="button button-secondary" type="button" id="article-download">Download PDF</button>` : ''}
+              <div class="reading-controls" role="group" aria-label="Reading font size">
+                <button class="reading-size-btn" type="button" data-size="normal" aria-label="Normal font size" title="Normal text size">A</button>
+                <button class="reading-size-btn" type="button" data-size="large" aria-label="Large font size" title="Large text size">A+</button>
+                <button class="reading-size-btn" type="button" data-size="xlarge" aria-label="Extra large font size" title="Extra large text size">A++</button>
+              </div>
             </div>
           </header>
 
@@ -701,6 +838,8 @@ async function initArticle() {
       // pitch, and the link is the same one the buyer follows.
       initShare(shell, article);
 
+      if (updateReadingProgress) updateReadingProgress();
+
       if (locked) {
         // The body is not on the page, so neither are its affordances: the
         // quiz, reactions, assistant and selection tool are all gated too.
@@ -708,8 +847,10 @@ async function initArticle() {
         initPaywall(shell, article, paywallSignedIn);
       } else {
         bindCopyButtons(shell);
+        enhanceCodeSnippets(shell);
         highlightSnippets(shell);
         initTableOfContents(shell);
+        initReadingSize(shell);
         initPdfDownload(shell, article);
         // Not awaited: it resolves the Supabase session first, and the article
         // should not wait on that to appear.
@@ -720,7 +861,9 @@ async function initArticle() {
 
         const askAiBtn = document.querySelector('#ask-ai-cta-btn');
         if (askAiBtn) {
-          askAiBtn.addEventListener('click', () => openChatForArticle(article.slug || article.id, article.title));
+          askAiBtn.addEventListener('click', () => openChatForArticle(article.slug || article.id, article.title, {
+            category: article.category?.name,
+          }));
         }
       }
     }

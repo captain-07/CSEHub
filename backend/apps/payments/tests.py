@@ -69,3 +69,41 @@ class CanReadArticleTests(TestCase):
 
     def test_a_missing_article_is_never_readable(self):
         self.assertFalse(can_read_article(self.buyer, None))
+
+
+class MyPurchasesViewTests(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        User = get_user_model()
+        self.reader = User.objects.create_user(
+            email='reader2@example.com', username='reader2', password='password'
+        )
+        self.buyer = User.objects.create_user(
+            email='buyer2@example.com', username='buyer2', password='password'
+        )
+        self.paid = Article.objects.create(
+            title='Paid Article', slug='paid-article', content={'blocks': []},
+            is_published=True, is_paid=True, price=Decimal('199.00')
+        )
+        make_purchase(self.buyer, self.paid, status=Purchase.STATUS_PAID)
+        self.client = APIClient()
+
+    def test_anonymous_cannot_list_purchases(self):
+        response = self.client.get('/api/payments/my-purchases/')
+        self.assertEqual(response.status_code, 401)
+
+    def test_reader_with_no_purchases_gets_empty_list(self):
+        self.client.force_authenticate(user=self.reader)
+        response = self.client.get('/api/payments/my-purchases/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_buyer_lists_paid_purchases(self):
+        self.client.force_authenticate(user=self.buyer)
+        response = self.client.get('/api/payments/my-purchases/')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['slug'], 'paid-article')
+        self.assertEqual(data[0]['title'], 'Paid Article')
+

@@ -88,10 +88,14 @@
 .nav-search-input {
   width: 11rem;
   max-width: 40vw;
-  padding: 0.4rem var(--space-2xs);
+  padding: 0.4rem var(--space-2xs) 0.4rem 2rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background-color: var(--bg-primary);
+  background-image: var(--search-icon);
+  background-repeat: no-repeat;
+  background-position: left 0.65rem center;
+  background-size: 14px 14px;
   color: var(--text-primary);
   font-family: inherit;
   font-size: var(--text-sm);
@@ -281,4 +285,53 @@ body.nav-open {
     width: 100%;
     min-height: 44px;
   }
+}
+
+/* Back to top floating button */
+.back-to-top {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.back-to-top.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.back-to-top:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.back-to-top:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.back-to-top-icon {
+  display: block;
+}
+
+body.chat-open .back-to-top,
+body.quiz-open .back-to-top {
+  display: none;
 }

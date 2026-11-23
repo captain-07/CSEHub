@@ -7,6 +7,8 @@ is made.
 
 from rest_framework import serializers
 
+from .models import Purchase
+
 
 class CheckoutSerializer(serializers.Serializer):
     slug = serializers.CharField(
@@ -55,3 +57,24 @@ class PaymentStatusSerializer(serializers.Serializer):
     purchase_id = serializers.IntegerField(required=False)
     has_access = serializers.BooleanField(required=False)
     detail = serializers.CharField(required=False)
+
+
+class MyPurchasesSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='article.id')
+    slug = serializers.CharField(source='article.slug')
+    title = serializers.CharField(source='article.title')
+    excerpt = serializers.CharField(source='article.excerpt')
+    price = serializers.DecimalField(source='article.price', max_digits=8, decimal_places=2)
+    category = serializers.SerializerMethodField()
+    purchased_at = serializers.DateTimeField(source='created_at')
+
+    class Meta:
+        model = Purchase
+        fields = ['id', 'slug', 'title', 'excerpt', 'price', 'category', 'purchased_at']
+
+    def get_category(self, obj):
+        cat = obj.article.category
+        if not cat:
+            return None
+        return {'id': cat.id, 'name': cat.name, 'slug': cat.slug}
+

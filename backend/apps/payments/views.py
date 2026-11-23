@@ -33,6 +33,7 @@ from .models import PaymentEvent, Purchase
 from .serializers import (
     CheckoutResponseSerializer,
     CheckoutSerializer,
+    MyPurchasesSerializer,
     PaymentStatusSerializer,
     VerifyPaymentSerializer,
 )
@@ -281,6 +282,38 @@ class VerifyPaymentView(APIView):
 
         purchase.record_payment(data['razorpay_payment_id'])
         return Response(_paid_payload(purchase))
+
+
+class MyPurchasesView(APIView):
+    """List paid articles owned by the currently authenticated reader."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="List the authenticated user's purchased articles",
+        responses={200: MyPurchasesSerializer(many=True)},
+    )
+    def get(self, request):
+        # A purchase of an article that has since been unpublished is left out:
+        # the detail route only serves published articles, so listing it would
+        # be a link that 404s for the reader who paid for it.
+        purchases = (
+            Purchase.objects.filter(
+                user=request.user,
+                status=Purchase.STATUS_PAID,
+                article__is_published=True,
+            )
+            .select_related('article', 'article__category')
+            .order_by('-created_at')
+        )
+        seen = set()
+        unique_purchases = []
+        for p in purchases:
+            if p.article_id not in seen:
+                seen.add(p.article_id)
+                unique_purchases.append(p)
+        serializer = MyPurchasesSerializer(unique_purchases, many=True)
+        return Response(serializer.data)
 
 
 class RazorpayWebhookView(APIView):

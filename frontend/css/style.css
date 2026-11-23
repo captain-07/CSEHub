@@ -258,6 +258,12 @@ code, pre, kbd, samp {
   cursor: progress;
 }
 
+.button-sm {
+  min-height: 32px;
+  padding: 0.35rem 0.75rem;
+  font-size: var(--text-xs);
+}
+
 .button-primary {
   color: var(--on-accent);
   background-color: var(--accent);

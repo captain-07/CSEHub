@@ -129,6 +129,72 @@ export function initNavbar() {
   subscribeAuth((state) => renderMenu(menu, state));
   initAuth();
   initThemeToggle();
+  initBackToTop();
+  initGlobalShortcuts();
+}
+
+function initGlobalShortcuts() {
+  document.addEventListener('keydown', (event) => {
+    if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const active = document.activeElement;
+      const isEditable = active && (
+        active.tagName === 'INPUT' ||
+        active.tagName === 'TEXTAREA' ||
+        active.tagName === 'SELECT' ||
+        active.isContentEditable ||
+        Boolean(active.closest('.codex-editor')) ||
+        Boolean(active.closest('[contenteditable="true"]'))
+      );
+      if (isEditable) return;
+
+      const pageSearch = document.querySelector('.filters input[name="search"]');
+      const navSearch = document.querySelector('#nav-search-input');
+      const target = pageSearch || navSearch;
+      if (target) {
+        event.preventDefault();
+        target.focus();
+        target.select?.();
+      }
+    } else if (event.key === 'Escape') {
+      const active = document.activeElement;
+      if (active && (active.id === 'nav-search-input' || active.name === 'search')) {
+        active.blur();
+      }
+    }
+  });
+}
+
+function initBackToTop() {
+  if (document.querySelector('.back-to-top')) return;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'back-to-top';
+  btn.setAttribute('aria-label', 'Back to top');
+  btn.title = 'Back to top';
+  btn.innerHTML = `
+    <svg class="back-to-top-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>`;
+  document.body.appendChild(btn);
+
+  let ticking = false;
+  const onScroll = () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const scrollY = window.scrollY || document.documentElement.scrollTop;
+      btn.classList.toggle('is-visible', scrollY > 350);
+      ticking = false;
+    });
+  };
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+
+  btn.addEventListener('click', () => {
+    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: prefersReduced ? 'instant' : 'smooth' });
+  });
 }
 
 function renderMenu(menu, state) {
