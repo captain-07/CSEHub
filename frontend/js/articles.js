@@ -179,6 +179,9 @@ function populateTagSelect(select, tags, categories, currentValue, allLabel, cat
 /** Assigned by initLibrary; the chips rendered by renderLibrary call it. */
 let applyFilters = null;
 
+/** Assigned by initLibrary; a render cycle drives the search field's spinner. */
+let setSearchBusy = () => {};
+
 /**
  * Runs one library fetch-and-render cycle.
  *
@@ -258,6 +261,10 @@ async function renderLibrary(filters, { requestToken, contentArea, filterForm } 
     contentArea.querySelector('[data-retry]')?.addEventListener('click', () => {
       renderLibrary(readFilters(), { requestToken, contentArea, filterForm });
     });
+  } finally {
+    // Only the newest request owns the spinner: an older response finishing
+    // late must not claim the field is idle while a newer one is in flight.
+    if (token === requestToken.value) setSearchBusy(false);
   }
 }
 
@@ -270,8 +277,6 @@ function syncFilterForm(filterForm, filters) {
   if (document.activeElement !== search && search.value !== filters.search) {
     search.value = filters.search;
   }
-  const searchClear = filterForm.querySelector('.search-clear-btn');
-  if (searchClear) searchClear.hidden = !search.value;
   filterForm.elements.ordering.value = filters.ordering;
   filterForm.elements.category.value = filters.category || '';
   filterForm.elements.tag.value = filters.tag || '';
@@ -307,14 +312,26 @@ function initLibrary() {
   if (filterForm) {
     const searchInput = filterForm.elements.search;
     const searchClear = filterForm.querySelector('.search-clear-btn');
-    const syncClearBtn = () => {
-      if (searchClear) searchClear.hidden = !searchInput.value;
+    const searchSpinner = filterForm.querySelector('.search-spinner');
+    const searchField = searchInput.closest('.search-field');
+    let searchBusy = false;
+
+    // One slot, two states: the query is clearable while idle, and the field
+    // reports that it is working while it waits for the debounce or the fetch.
+    const syncSearchChrome = () => {
+      if (searchClear) searchClear.hidden = searchBusy || !searchInput.value;
+      if (searchSpinner) searchSpinner.hidden = !searchBusy;
+      if (searchField) searchField.setAttribute('aria-busy', String(searchBusy));
     };
-    syncClearBtn();
+    setSearchBusy = (busy) => {
+      searchBusy = Boolean(busy);
+      syncSearchChrome();
+    };
+    syncSearchChrome();
 
     searchClear?.addEventListener('click', () => {
       searchInput.value = '';
-      syncClearBtn();
+      setSearchBusy(false);
       searchInput.focus();
       applyFilters({ search: '' }, { replace: Boolean(readFilters().search) });
     });
@@ -323,13 +340,16 @@ function initLibrary() {
     // but only after a pause so each keystroke is not a request.
     let searchTimer = null;
     searchInput.addEventListener('input', (event) => {
-      syncClearBtn();
       clearTimeout(searchTimer);
       const value = event.target.value;
       if (!value.trim()) {
+        setSearchBusy(false);
         applyFilters({ search: '' }, { replace: Boolean(readFilters().search) });
         return;
       }
+      // Busy from the keystroke, not from the request: the 450 ms debounce is
+      // part of the wait the reader experiences.
+      setSearchBusy(true);
       searchTimer = setTimeout(
         () => applyFilters({ search: value.trim() }, { replace: Boolean(readFilters().search) }),
         450,
@@ -350,6 +370,7 @@ function initLibrary() {
     filterForm.addEventListener('submit', (event) => {
       event.preventDefault();
       clearTimeout(searchTimer);
+      setSearchBusy(true);
       applyFilters({
         search: filterForm.elements.search.value.trim(),
         category: filterForm.elements.category.value,

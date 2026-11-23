@@ -185,13 +185,26 @@ export function snippetMarkup({ code = '', language = '' } = {}) {
   // The class carries the grammar, not the raw label: an unrecognised value
   // would otherwise emit a class that no stylesheet matches.
   const codeClass = known ? ` class="language-${escapeHtml(known)}"` : '';
+  // Line numbers exist so "line 12" is a reference a reader can hand to the
+  // tutor. They are a sibling of <code> rather than markup inside it, because
+  // highlight.js rewrites the code element's children on load, and they are
+  // skipped for a single line, where a lone "1" is only noise.
+  const lineCount = text.split('\n').length;
+  const gutter = lineCount > 1
+    ? `<span class="snippet-gutter" aria-hidden="true">${lineNumbers(lineCount)}</span>`
+    : '';
   return `<section class="snippet">`
     + `<div class="snippet-bar">`
     + `<span class="snippet-lang">${escapeHtml(label || 'code')}</span>`
     + `<button class="copy-button" type="button" data-code="${encodeURIComponent(text)}">Copy code</button>`
     + `</div>`
-    + `<pre><code${codeClass}>${escapeHtml(text)}</code></pre>`
+    + `<div class="snippet-body">${gutter}<pre><code${codeClass}>${escapeHtml(text)}</code></pre></div>`
     + `</section>`;
+}
+
+/** 1..count, newline-separated; the gutter keeps its whitespace via CSS. */
+function lineNumbers(count) {
+  return Array.from({ length: count }, (_, index) => index + 1).join('\n');
 }
 
 /**

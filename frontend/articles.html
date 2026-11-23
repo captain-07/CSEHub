@@ -44,6 +44,9 @@
             <span class="sr-only">Search articles</span>
             <input name="search" type="search" placeholder="Search articles" autocomplete="off" />
             <button class="search-clear-btn" type="button" aria-label="Clear search query" hidden>&times;</button>
+            <!-- Sits in the clear button's place while a search is pending, so
+                 typing, the debounce and the request all look like one action. -->
+            <span class="search-spinner" aria-hidden="true" hidden></span>
           </label>
 
           <label>

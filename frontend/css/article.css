@@ -625,6 +625,33 @@
   scrollbar-color: #2d3d36 transparent;
 }
 
+/* The gutter is a sibling of <pre>, so horizontal scrolling of a long line
+   never carries the numbers away and highlight.js can still rewrite <code>. */
+.snippet-body {
+  display: flex;
+  align-items: stretch;
+}
+
+.snippet-body pre {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.snippet-gutter {
+  flex: 0 0 auto;
+  padding: 1.35rem 0.9rem;
+  color: #7a8f85;
+  font-family: var(--font-mono);
+  font-size: 0.895rem;
+  line-height: 1.7;
+  text-align: right;
+  white-space: pre;
+  border-right: 1px solid #2d3d36;
+  background-color: #141c1a;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .snippet pre::-webkit-scrollbar {
   height: 6px;
 }
@@ -633,15 +660,15 @@
   border-radius: 3px;
 }
 
-/* Collapsible long snippets */
-.snippet-collapsible pre {
+/* Collapsible long snippets: the clamp lives on the row so the gutter and the
+   code are cut at the same line. */
+.snippet-collapsible .snippet-body {
   max-height: 400px;
   overflow: hidden;
 }
 
-.snippet.is-expanded pre {
+.snippet.is-expanded .snippet-body {
   max-height: none;
-  overflow-x: auto;
 }
 
 .snippet-expand-btn {

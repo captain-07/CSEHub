@@ -209,6 +209,39 @@
   display: none !important;
 }
 
+/* Shown from the first keystroke until the results for that query are painted,
+   covering the debounce pause and the request as a single "working" state. */
+.search-spinner {
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: search-spinner-spin 0.7s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.search-spinner[hidden] {
+  display: none !important;
+}
+
+@keyframes search-spinner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-spinner {
+    animation-duration: 1.8s;
+  }
+}
+
 /* ── Results header ──────────────────────────────────────────── */
 .results-heading {
   display: flex;
