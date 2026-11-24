@@ -39,8 +39,11 @@ def _prepare_question(request, article, question):
     """Record the reader's message, and return (conversation, history).
 
     The history is read *before* the new message is written, so the model is not
-    handed the same question twice. Shared by the whole-answer and streaming
-    paths: a provider failure must leave the conversation in exactly one state,
+    handed the same question twice. It is returned as message rows rather than a
+    transcript string: `rag_chat` turns them into real conversation turns, which
+    is what lets a follow-up ("why?") be understood as a follow-up instead of a
+    quote inside a new question. Shared by the whole-answer and streaming paths,
+    so a provider failure must leave the conversation in exactly one state,
     whichever route the reader used.
     """
     conversation, _ = Conversation.objects.get_or_create(
@@ -51,10 +54,7 @@ def _prepare_question(request, article, question):
     recent_messages = list(
         conversation.messages.order_by('-created_at')[:HISTORY_TURNS]
     )
-    history = '\n'.join(
-        f"{message.role}: {message.content}"
-        for message in reversed(recent_messages)
-    )
+    history = list(reversed(recent_messages))
     Message.objects.create(
         conversation=conversation,
         role='user',

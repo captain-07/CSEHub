@@ -308,6 +308,19 @@ GEMINI_API_KEY = env('GEMINI_API_KEY', default='')
 # endpoint. Override with GEMINI_MODEL when Google retires this one too.
 GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash-lite')
 
+# Chat and quiz generation can run on different models, and usually should.
+# Chat is the high-volume reader endpoint, where the cheapest model that holds
+# a conversation wins. Quiz generation is an editor action that calls
+# `with_structured_output`, which Gemma-class models do not support — so it can
+# stay on a Gemini model while chat moves off one. Both default to GEMINI_MODEL.
+GEMINI_CHAT_MODEL = env('GEMINI_CHAT_MODEL', default=GEMINI_MODEL)
+GEMINI_QUIZ_MODEL = env('GEMINI_QUIZ_MODEL', default=GEMINI_MODEL)
+# Set False for a model that rejects a system instruction (Gemma does): the
+# assistant's rules are then folded into the human turn, which it follows less
+# reliably. `manage.py check_llm --model <id>` reports whether a model accepts
+# one, so this is decided by evidence rather than by family name.
+GEMINI_CHAT_SYSTEM_INSTRUCTION = env.bool('GEMINI_CHAT_SYSTEM_INSTRUCTION', default=True)
+
 # Keep the vector index in step with published articles without paying for a
 # re-embedding on every save. The signals only queue an id after the saving
 # transaction commits, and `apps.chatbot.indexing` does the network work on a

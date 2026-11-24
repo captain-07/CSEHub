@@ -1,16 +1,19 @@
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from rest_framework.test import APITestCase
 
 from apps.articles.models import Article
+from .llm import build_llm
 from .models import Conversation, Message
-from .rag_chat import ChatServiceError, _response_text, answer_question
+from .rag_chat import ChatServiceError, _response_text, answer_question, get_llm
 
 
 class ChatTests(APITestCase):
@@ -336,24 +339,61 @@ class AnswerQuestionTests(TestCase):
         answer = answer_question(self.article, 'What is LL?')
 
         self.assertEqual(answer, 'A linked list is a sequence of nodes.')
-        prompt = get_llm.return_value.invoke.call_args[0][0]
-        self.assertIn('Linked Lists in Practice', prompt)
-        self.assertIn('What is LL?', prompt)
-        self.assertIn('No part of this article matched', prompt)
+        messages = get_llm.return_value.invoke.call_args[0][0]
+        # The rules are a real system instruction, not text inside the question:
+        # Gemini maps SystemMessage to `system_instruction`, which it follows
+        # far more reliably.
+        self.assertIsInstance(messages[0], SystemMessage)
+        self.assertIn('Linked Lists in Practice', messages[0].content)
+        self.assertIn('No part of this article matched', messages[0].content)
+        # The human turn is the question itself, with no prompt scaffolding.
+        self.assertIsInstance(messages[-1], HumanMessage)
+        self.assertEqual(messages[-1].content, 'What is LL?')
 
     @patch('apps.chatbot.rag_chat.get_llm')
     @patch('apps.chatbot.rag_chat.get_vectorstore')
-    def test_context_and_history_reach_the_prompt(self, get_vectorstore, get_llm):
+    def test_context_and_history_reach_the_model_as_turns(self, get_vectorstore, get_llm):
         doc = type('Doc', (), {'page_content': 'A node holds a value and a pointer.'})()
         get_vectorstore.return_value.similarity_search.return_value = [doc]
         get_llm.return_value.invoke.return_value = 'ok'
 
-        answer_question(self.article, 'What is a node?', history='user: earlier question')
+        history = [
+            SimpleNamespace(role='user', content='earlier question'),
+            SimpleNamespace(role='assistant', content='earlier answer'),
+        ]
+        answer_question(self.article, 'What is a node?', history=history)
 
-        prompt = get_llm.return_value.invoke.call_args[0][0]
-        self.assertIn('A node holds a value and a pointer.', prompt)
-        self.assertIn('user: earlier question', prompt)
-        self.assertNotIn('No part of this article matched', prompt)
+        messages = get_llm.return_value.invoke.call_args[0][0]
+        self.assertIn('A node holds a value and a pointer.', messages[0].content)
+        self.assertNotIn('No part of this article matched', messages[0].content)
+        # Stored rows arrive as turns, so a follow-up is understood as a
+        # follow-up rather than as a quoted transcript inside a new question.
+        self.assertEqual(
+            [message.content for message in messages[1:]],
+            ['earlier question', 'earlier answer', 'What is a node?'],
+        )
+        self.assertIsInstance(messages[1], HumanMessage)
+        self.assertIsInstance(messages[2], AIMessage)
+
+    @override_settings(GEMINI_CHAT_SYSTEM_INSTRUCTION=False)
+    @patch('apps.chatbot.rag_chat.get_llm')
+    @patch('apps.chatbot.rag_chat.get_vectorstore')
+    def test_a_model_without_system_instructions_gets_the_rules_inline(self, get_vectorstore, get_llm):
+        """Gemma rejects a SystemMessage, so the rules ride along with the question.
+
+        The arrangement is weaker — that is why it is opt-in — but it must still
+        reach the model, or a cheaper model would answer with no tutor rules at
+        all.
+        """
+        get_vectorstore.return_value.similarity_search.return_value = []
+        get_llm.return_value.invoke.return_value = 'ok'
+
+        answer_question(self.article, 'What is LL?')
+
+        messages = get_llm.return_value.invoke.call_args[0][0]
+        self.assertFalse(any(isinstance(message, SystemMessage) for message in messages))
+        self.assertIn('patient computer-science tutor', messages[-1].content)
+        self.assertIn('What is LL?', messages[-1].content)
 
     @patch('apps.chatbot.rag_chat.get_llm')
     @patch('apps.chatbot.rag_chat.get_vectorstore')
@@ -363,6 +403,43 @@ class AnswerQuestionTests(TestCase):
 
         with self.assertRaises(ChatServiceError):
             answer_question(self.article, 'Why?')
+
+
+class AssistantModelTests(TestCase):
+    """The assistant's call is shaped, not left to the model's defaults.
+
+    `temperature` is ignored by the lite model, so reply length is the sampling
+    property actually worth setting — and it has to survive all the way to the
+    client. The quiz generator deliberately leaves it unset.
+    """
+
+    @patch('apps.chatbot.rag_chat.build_llm')
+    def test_the_assistant_asks_for_a_length_ceiling(self, build_llm):
+        get_llm()
+        self.assertEqual(build_llm.call_args.kwargs['max_tokens'], 800)
+
+    @patch('apps.chatbot.rag_chat.build_llm')
+    def test_the_assistant_uses_the_chat_model(self, build_llm):
+        get_llm()
+        self.assertEqual(build_llm.call_args.kwargs['model'], settings.GEMINI_CHAT_MODEL)
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.chatbot.llm.ChatGoogleGenerativeAI')
+    def test_the_model_can_be_chosen_per_feature(self, client):
+        build_llm(model='a-different-model')
+        self.assertEqual(client.call_args.kwargs['model'], 'a-different-model')
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.chatbot.llm.ChatGoogleGenerativeAI')
+    def test_the_client_receives_the_ceiling(self, client):
+        build_llm(max_tokens=800)
+        self.assertEqual(client.call_args.kwargs['max_tokens'], 800)
+
+    @override_settings(GEMINI_API_KEY='test-key')
+    @patch('apps.chatbot.llm.ChatGoogleGenerativeAI')
+    def test_the_quiz_generator_can_leave_it_unset(self, client):
+        build_llm(temperature=0.2, max_retries=0)
+        self.assertIsNone(client.call_args.kwargs['max_tokens'])
 
 
 class ContentToTextTests(TestCase):

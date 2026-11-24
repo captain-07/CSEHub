@@ -223,7 +223,12 @@ def draft_questions(article, count: int = DEFAULT_QUESTION_COUNT) -> list[DraftQ
         # One attempt, kept below Gunicorn's default 30-second worker timeout.
         # A failed generation is an editor retrying a button, not a request that
         # must survive three provider timeouts while the browser has given up.
-        llm = build_llm(temperature=0.2, timeout=25, max_retries=0)
+        llm = build_llm(
+            model=settings.GEMINI_QUIZ_MODEL,
+            temperature=0.2,
+            timeout=25,
+            max_retries=0,
+        )
         result = llm.with_structured_output(DraftQuiz).invoke(prompt)
     except LLMServiceError as exc:
         raise QuizGenerationError(

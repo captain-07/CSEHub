@@ -14,20 +14,29 @@ class LLMServiceError(Exception):
     """A configuration or provider failure that is safe to report through the API."""
 
 
-def build_llm(*, temperature=0.3, timeout=30, max_retries=2):
+def build_llm(*, model=None, temperature=0.3, timeout=30, max_retries=2, max_tokens=None):
     """Return a configured Gemini chat client.
+
+    `model` defaults to `GEMINI_MODEL`; the assistant passes
+    `GEMINI_CHAT_MODEL` and the quiz generator `GEMINI_QUIZ_MODEL`, so the two
+    can be priced and tested independently.
 
     `temperature` is ignored by `gemini-3.5-flash-lite`, which fixes its own
     sampling defaults; it is still passed for models that honour it.
+
+    `max_tokens` is opt-in. Chat sets a ceiling because the reply has a target
+    length; the quiz generator leaves it unset because a truncated structured
+    response is a parse failure rather than a slightly short answer.
     """
     if not settings.GEMINI_API_KEY:
         raise LLMServiceError('The AI service is not configured.')
     return ChatGoogleGenerativeAI(
-        model=settings.GEMINI_MODEL,
+        model=model or settings.GEMINI_MODEL,
         google_api_key=settings.GEMINI_API_KEY,
         temperature=temperature,
         timeout=timeout,
         max_retries=max_retries,
+        max_tokens=max_tokens,
     )
 
 
