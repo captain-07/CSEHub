@@ -4,7 +4,8 @@ from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
 from apps.articles.models import Article
@@ -14,6 +15,10 @@ from .rag_chat import ChatServiceError, _response_text, answer_question
 
 class ChatTests(APITestCase):
     def setUp(self):
+        # The throttle counters live in the cache, which the test database
+        # rollback does not clear; primary keys restart between tests, so a
+        # stale count would be charged to a different test's user.
+        cache.clear()
         self.user = get_user_model().objects.create_user(email='user@example.com', username='user')
         self.other = get_user_model().objects.create_user(email='other@example.com', username='other')
         self.article = Article.objects.create(title='Article', slug='article', content={'blocks': []}, is_published=True)
@@ -105,6 +110,7 @@ class StreamingChatTests(APITestCase):
     """
 
     def setUp(self):
+        cache.clear()
         self.user = get_user_model().objects.create_user(
             email='stream@example.com', username='stream'
         )
@@ -229,6 +235,80 @@ class StreamingChatTests(APITestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.data['code'], 'chat_error')
+
+
+class ChatThrottleTests(APITestCase):
+    """The ask routes cost money per request, so they are capped per user.
+
+    Both windows are exercised with a low rate instead of the deployment's
+    defaults, so the test does not depend on production tuning.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = get_user_model().objects.create_user(
+            email='throttle@example.com', username='throttle'
+        )
+        self.article = Article.objects.create(
+            title='Article',
+            slug='throttle-article',
+            content={'blocks': []},
+            is_published=True,
+        )
+        self.ask = '/api/articles/throttle-article/ask/'
+        self.stream = '/api/articles/throttle-article/ask/stream/'
+        self.client.force_authenticate(self.user)
+
+    @override_settings(CHAT_THROTTLE_RATE='2/min', CHAT_THROTTLE_DAILY_RATE='100/day')
+    @patch('apps.chatbot.views.answer_question', return_value='An answer')
+    def test_the_whole_answer_route_is_capped(self, answer):
+        for _ in range(2):
+            self.assertEqual(
+                self.client.post(self.ask, {'question': 'Why?'}, format='json').status_code,
+                200,
+            )
+
+        response = self.client.post(self.ask, {'question': 'Why?'}, format='json')
+
+        self.assertEqual(response.status_code, 429)
+        # The refused request never reached the view, so it was not recorded as
+        # a question. A reader who retries once the window reopens is not
+        # charged twice for one question.
+        self.assertEqual(Message.objects.filter(role='user').count(), 2)
+
+    @override_settings(CHAT_THROTTLE_RATE='2/min', CHAT_THROTTLE_DAILY_RATE='100/day')
+    @patch('apps.chatbot.views.stream_answer')
+    def test_the_two_routes_share_one_budget(self, stream):
+        # A fresh iterator per call: each request consumes the reply once.
+        stream.side_effect = lambda *args, **kwargs: iter(['Hello'])
+
+        self.assertEqual(
+            self.client.post(self.ask, {'question': 'Why?'}, format='json').status_code,
+            200,
+        )
+        first = self.client.post(self.stream, {'question': 'Why?'}, format='json')
+        self.assertEqual(first.status_code, 200)
+        read_frames(first)
+
+        # Asking in pieces must not buy a second allowance.
+        self.assertEqual(
+            self.client.post(self.stream, {'question': 'Why?'}, format='json').status_code,
+            429,
+        )
+
+    @override_settings(CHAT_THROTTLE_RATE='100/min', CHAT_THROTTLE_DAILY_RATE='2/day')
+    @patch('apps.chatbot.views.answer_question', return_value='An answer')
+    def test_the_daily_window_is_a_second_ceiling(self, answer):
+        for _ in range(2):
+            self.assertEqual(
+                self.client.post(self.ask, {'question': 'Why?'}, format='json').status_code,
+                200,
+            )
+
+        self.assertEqual(
+            self.client.post(self.ask, {'question': 'Why?'}, format='json').status_code,
+            429,
+        )
 
 
 class AnswerQuestionTests(TestCase):

@@ -315,6 +315,14 @@ GEMINI_MODEL = env('GEMINI_MODEL', default='gemini-3.5-flash-lite')
 # and a no-op when the Pinecone/Gemini settings above are absent.
 RAG_AUTO_INDEX = env.bool('RAG_AUTO_INDEX', default=not TESTING)
 
+# The assistant is the only endpoint that spends money per request (a Gemini
+# call plus a Pinecone query), and the drawer is open to any signed-in account.
+# These are per-user ceilings: the burst window stops a scripted loop, the daily
+# window bounds what one account can cost. The two ask routes share both
+# counters. Raise them only alongside the provider plan.
+CHAT_THROTTLE_RATE = env('CHAT_THROTTLE_RATE', default='20/min')
+CHAT_THROTTLE_DAILY_RATE = env('CHAT_THROTTLE_DAILY_RATE', default='200/day')
+
 # --- Payments ---------------------------------------------------------------
 #
 # Razorpay. Absent keys do not stop the site from starting: free articles keep

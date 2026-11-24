@@ -16,6 +16,7 @@ from apps.payments.access import PAID_ARTICLE_MESSAGE, can_read_article
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, AskQuestionSerializer
 from .rag_chat import answer_question, stream_answer, ChatServiceError
+from .throttling import ChatBurstThrottle, ChatDailyThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,9 @@ def _conversation_payload(conversation, messages):
 
 class AskArticleView(APIView):
     permission_classes = [IsAuthenticated]
+    # These routes spend provider money on every request, so each is capped per
+    # user. See `throttling.py` for why both windows exist.
+    throttle_classes = [ChatBurstThrottle, ChatDailyThrottle]
 
     @extend_schema(
         request=AskQuestionSerializer,
@@ -248,6 +252,9 @@ class AskArticleStreamView(APIView):
 
     permission_classes = [IsAuthenticated]
     content_negotiation_class = EventStreamNegotiation
+    # The same budget as the whole-answer route: asking in pieces must not buy a
+    # second allowance.
+    throttle_classes = [ChatBurstThrottle, ChatDailyThrottle]
 
     @extend_schema(
         request=AskQuestionSerializer,

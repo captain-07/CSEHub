@@ -393,6 +393,7 @@ function chatErrorMessage(error) {
   if (error.status === 401) return 'Your session has expired. Sign in again to keep asking questions.';
   if (error.status === 403) return 'You do not have access to the assistant on this article.';
   if (error.status === 404) return 'This article is no longer available.';
+  if (error.status === 429) return 'You have reached the assistant\'s question limit. Please try again later.';
   if (error.status === 503) return 'The assistant is not configured or is temporarily unavailable. Please try again shortly.';
   if (error.status === 502) return 'The assistant hit an unexpected error. Please try again.';
   return friendlyError(error);
