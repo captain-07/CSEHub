@@ -18,7 +18,10 @@ for (const file of files) {
   const src = readFileSync(file, 'utf8');
   const names = new Set();
 
-  for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z0-9_$]+)/g)) names.add(m[1]);
+  // `function\*?` is deliberate: a generator is exported and imported like
+  // any other function, and a checker that cannot see one reports a perfectly
+  // valid `export async function*` as a missing export.
+  for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function\*?|class|const|let|var)\s+([A-Za-z0-9_$]+)/g)) names.add(m[1]);
   for (const m of src.matchAll(/export\s*\{([^}]+)\}/g)) {
     m[1].split(',').forEach((n) => names.add(n.trim().split(/\s+as\s+/).pop().trim()));
   }
@@ -81,7 +84,7 @@ for (const file of files) {
     }
   }
 
-  for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?(?:function|class|const|let|var)\s+([A-Za-z0-9_$]+)/gm)) {
+  for (const m of src.matchAll(/^(?:export\s+)?(?:async\s+)?(?:function\*?|class|const|let|var)\s+([A-Za-z0-9_$]+)/gm)) {
     add(m[1], 'declaration');
   }
 }

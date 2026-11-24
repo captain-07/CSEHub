@@ -126,18 +126,140 @@ export async function apiFetch(endpoint, options = {}) {
 
     // Surface DRF field errors (e.g. {"title": ["This field is required."]})
     // instead of a generic status message.
-    const fieldError = data && typeof data === 'object' && !Array.isArray(data)
-      ? Object.entries(data).find(([key, value]) => key !== 'detail' && typeof value === 'object' && value !== null)
-      : null;
-
-    const errorMsg = fieldError
-      ? `${Array.isArray(fieldError[1]) ? fieldError[1][0] : fieldError[1]}`
-      : data?.detail || data?.message || `API request failed with status ${response.status}`;
+    const errorMsg = errorMessageFor(data, response.status);
 
     throw new ApiError(errorMsg, response.status, data);
   }
 
   return data;
+}
+
+/**
+ * The one sentence a failed response should produce.
+ *
+ * DRF field errors win, because they name the actual problem ("This field is
+ * required."), then the server's own `detail`, then a neutral status line.
+ * Shared with `apiStream` so a refused stream reads exactly like a refused
+ * request.
+ */
+function errorMessageFor(data, status) {
+  const fieldError = data && typeof data === 'object' && !Array.isArray(data)
+    ? Object.entries(data).find(([key, value]) => key !== 'detail' && typeof value === 'object' && value !== null)
+    : null;
+
+  if (fieldError) {
+    return `${Array.isArray(fieldError[1]) ? fieldError[1][0] : fieldError[1]}`;
+  }
+  return data?.detail || data?.message || `API request failed with status ${status}`;
+}
+
+/**
+ * Open a server-sent event stream and hand back the live response.
+ *
+ * `apiFetch` cannot do this: it reads the whole body before returning, and the
+ * point of a stream is to read it as it arrives. Everything that happens before
+ * the first byte is identical — the bearer token, the JSON body, and a matching
+ * `ApiError` for a request the server refuses — so a 402/404/503 here reads
+ * exactly like it does on the non-streaming route.
+ *
+ * The timeout covers time-to-first-byte, not the whole answer. A long reply is
+ * expected; a silent connection is what the timer is for. Once headers arrive
+ * the timer is cleared and the caller reads at its own pace.
+ */
+export async function apiStream(endpoint, options = {}) {
+  const url = buildApiUrl(endpoint);
+  const { timeout = DEFAULT_TIMEOUT_MS, ...request } = options;
+
+  const headers = new Headers(request.headers || {});
+  if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
+
+  try {
+    const token = await getSessionToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  } catch (err) {
+    console.error('Failed to retrieve Supabase session token:', err);
+  }
+
+  if (request.body && typeof request.body === 'object' && !(request.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+    request.body = JSON.stringify(request.body);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  let response;
+  try {
+    response = await fetch(url, { ...request, headers, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new ApiError(
+        `The server did not respond in time (${Math.round(timeout / 1000)}s). It may be starting up - please try again in a moment.`,
+        0
+      );
+    }
+    throw new ApiError('Unable to reach the CSEHub API. Check your connection and try again.', 0);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      // A proxy's HTML error page, or an empty body: the status still speaks.
+    }
+    throw new ApiError(errorMessageFor(data, response.status), response.status, data);
+  }
+
+  if (!response.body) {
+    throw new ApiError('This browser cannot read a streamed reply. Please update it and try again.', 0);
+  }
+
+  return response;
+}
+
+/**
+ * Yield each JSON payload of a `text/event-stream` body.
+ *
+ * Only `data:` lines are read, which is the whole frame format the assistant
+ * uses. A frame is separated by a blank line, so the buffer is split on the
+ * double newline rather than on any single read: a chunk boundary lands
+ * wherever the network puts it, and a half-arrived frame must not be parsed.
+ */
+export async function* readServerEvents(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          try {
+            yield JSON.parse(raw);
+          } catch {
+            // A frame that is not our JSON is not worth breaking the reply
+            // over; the deltas around it are still readable.
+            console.error('Ignoring a malformed stream frame.');
+          }
+        }
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /**

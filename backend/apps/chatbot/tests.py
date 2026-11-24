@@ -1,3 +1,5 @@
+import json
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.conf import settings
@@ -6,7 +8,7 @@ from django.test import TestCase
 from rest_framework.test import APITestCase
 
 from apps.articles.models import Article
-from .models import Conversation
+from .models import Conversation, Message
 from .rag_chat import ChatServiceError, _response_text, answer_question
 
 
@@ -79,6 +81,131 @@ class ChatTests(APITestCase):
         self.assertEqual(_response_text(type('R', (), {'content': [{'text': 'one'}, {'text': ' two'}]})()), 'one two')
         with self.assertRaises(ChatServiceError):
             _response_text({'unexpected': 'shape'})
+
+
+def read_frames(response):
+    """Decode a streamed body into the JSON payloads a client would parse."""
+    body = b''.join(response.streaming_content).decode('utf-8')
+    return [
+        json.loads(line[len('data:'):].strip())
+        for line in body.splitlines()
+        if line.startswith('data:')
+    ]
+
+
+class StreamingChatTests(APITestCase):
+    """`POST .../ask/stream/` is the same answer, written out as it is produced.
+
+    Two things are load-bearing. A provider that is down *before the first word*
+    must still answer a real status code, because the frontend maps 503 to
+    "not configured or temporarily unavailable" and a cheerful 200 containing
+    an apology is how a config error becomes a mystery. And the reply is stored
+    once, after it is complete: half a sentence from a closed drawer is not an
+    answer, and writing it would poison the history the next question carries.
+    """
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            email='stream@example.com', username='stream'
+        )
+        self.article = Article.objects.create(
+            title='Article', slug='stream-article', content={'blocks': []}, is_published=True
+        )
+        self.url = '/api/articles/stream-article/ask/stream/'
+
+    def test_stream_requires_authentication(self):
+        response = self.client.post(self.url, {'question': 'Why?'}, format='json')
+        self.assertEqual(response.status_code, 401)
+
+    def test_a_draft_is_not_found(self):
+        Article.objects.create(title='Draft', slug='stream-draft', content={'blocks': []})
+        self.client.force_authenticate(self.user)
+        response = self.client.post(
+            '/api/articles/stream-draft/ask/stream/', {'question': 'Why?'}, format='json'
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_paid_article_is_refused_before_anything_is_streamed(self):
+        Article.objects.create(
+            title='Paid',
+            slug='stream-paid',
+            content={'blocks': []},
+            is_published=True,
+            is_paid=True,
+            price=Decimal('99.00'),
+        )
+        self.client.force_authenticate(self.user)
+        response = self.client.post(
+            '/api/articles/stream-paid/ask/stream/', {'question': 'Why?'}, format='json'
+        )
+        self.assertEqual(response.status_code, 402)
+        self.assertFalse(response.streaming)
+        self.assertFalse(Message.objects.exists())
+
+    @patch('apps.chatbot.views.stream_answer', return_value=iter(['Hello', ' there']))
+    def test_the_reply_arrives_in_pieces_and_is_stored_whole(self, stream):
+        self.client.force_authenticate(self.user)
+        response = self.client.post(self.url, {'question': 'Why?'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response['Content-Type'].startswith('text/event-stream'))
+
+        frames = read_frames(response)
+        self.assertEqual(frames[0], {'type': 'delta', 'text': 'Hello'})
+        self.assertEqual(frames[1], {'type': 'delta', 'text': ' there'})
+        self.assertEqual(frames[-1]['type'], 'done')
+        # The final frame carries the same payload as the history endpoint, so
+        # a client needs no second request to learn the stored message ids.
+        self.assertEqual(
+            [message['content'] for message in frames[-1]['conversation']['messages']],
+            ['Why?', 'Hello there'],
+        )
+        self.assertEqual(
+            list(
+                Conversation.objects.get(user=self.user, article=self.article)
+                .messages.order_by('created_at')
+                .values_list('content', flat=True)
+            ),
+            ['Why?', 'Hello there'],
+        )
+
+    @patch('apps.chatbot.views.stream_answer', side_effect=ChatServiceError('down'))
+    def test_a_provider_outage_is_a_503_not_a_cheerful_200(self, stream):
+        self.client.force_authenticate(self.user)
+        response = self.client.post(self.url, {'question': 'Why?'}, format='json')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'chat_unavailable')
+        # The question survives, exactly as on the non-streaming route; no
+        # fabricated reply is stored.
+        self.assertEqual(list(Message.objects.values_list('role', flat=True)), ['user'])
+
+    @patch('apps.chatbot.views.stream_answer')
+    def test_a_failure_after_the_first_word_travels_in_band(self, stream):
+        def pieces():
+            yield 'Half an'
+            raise ChatServiceError('went away')
+
+        stream.return_value = pieces()
+        self.client.force_authenticate(self.user)
+        response = self.client.post(self.url, {'question': 'Why?'}, format='json')
+
+        # 200 has already been sent by the time the provider fails, so the
+        # failure has to be an event rather than a status code.
+        self.assertEqual(response.status_code, 200)
+        frames = read_frames(response)
+        self.assertEqual(frames[0], {'type': 'delta', 'text': 'Half an'})
+        self.assertEqual(frames[-1]['type'], 'error')
+        self.assertEqual(frames[-1]['code'], 'chat_unavailable')
+        self.assertEqual(list(Message.objects.values_list('role', flat=True)), ['user'])
+
+    @patch('apps.chatbot.views.stream_answer', return_value=iter([]))
+    def test_an_empty_reply_is_a_bad_gateway(self, stream):
+        self.client.force_authenticate(self.user)
+        response = self.client.post(self.url, {'question': 'Why?'}, format='json')
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.data['code'], 'chat_error')
 
 
 class AnswerQuestionTests(TestCase):

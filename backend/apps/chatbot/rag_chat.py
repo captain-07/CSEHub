@@ -60,13 +60,33 @@ def _response_text(response) -> str:
         raise ChatServiceError(str(exc)) from exc
 
 
-def answer_question(article, question: str, history: str = '', k: int = 4) -> str:
-    """Answer `question` about `article`, preferring the article but not limited to it.
+def chunk_text(chunk) -> str:
+    """One streamed chunk's text, or '' when the chunk carries none.
 
-    Retrieval is scoped to the article's own vectors. When nothing matches, the
-    model is still asked: the tutor rules let it explain the idea from general
-    computer-science knowledge, clearly marked as background, instead of
-    refusing. Only a provider fault raises `ChatServiceError`.
+    Unlike `_response_text`, an empty piece is not a failure here: a stream
+    emits many chunks and some carry metadata rather than words.
+    """
+    content = getattr(chunk, 'content', chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get('text'), str):
+                parts.append(item['text'])
+        return ''.join(parts)
+    return ''
+
+
+def _prompt_for(article, question: str, history: str = '', k: int = 4) -> str:
+    """Retrieve the article's own context and build the prompt.
+
+    Shared by the whole-answer and streaming paths so the tutor rules, the
+    article scoping of retrieval and the no-match marker cannot drift between
+    them — a reader must get the same answer whether it arrives at once or in
+    pieces.
     """
     try:
         vectorstore = get_vectorstore()
@@ -85,14 +105,52 @@ def answer_question(article, question: str, history: str = '', k: int = 4) -> st
     context = "\n\n".join(doc.page_content for doc in docs) if docs else NO_ARTICLE_MATCH
 
     try:
-        prompt = SYSTEM_PROMPT.format(
+        return SYSTEM_PROMPT.format(
             title=article.title,
             category=article.category.name if article.category_id else 'uncategorised',
             context=context,
             history=history or '(none)',
             question=question,
         )
+    except ChatServiceError:
+        raise
+    except Exception as exc:
+        raise ChatServiceError("The learning service is temporarily unavailable.") from exc
+
+
+def answer_question(article, question: str, history: str = '', k: int = 4) -> str:
+    """Answer `question` about `article`, preferring the article but not limited to it.
+
+    Retrieval is scoped to the article's own vectors. When nothing matches, the
+    model is still asked: the tutor rules let it explain the idea from general
+    computer-science knowledge, clearly marked as background, instead of
+    refusing. Only a provider fault raises `ChatServiceError`.
+    """
+    prompt = _prompt_for(article, question, history=history, k=k)
+
+    try:
         return _response_text(get_llm().invoke(prompt))
+    except ChatServiceError:
+        raise
+    except Exception as exc:
+        raise ChatServiceError("The learning service is temporarily unavailable.") from exc
+
+
+def stream_answer(article, question: str, history: str = '', k: int = 4):
+    """Yield the answer in pieces, as the model writes it.
+
+    A failure before the first piece raises `ChatServiceError`, so the caller can
+    still answer with a proper status code. A failure *after* that point also
+    raises, but by then the response has begun: the caller reports it as a
+    streamed error event rather than a status it can no longer set.
+    """
+    prompt = _prompt_for(article, question, history=history, k=k)
+
+    try:
+        for piece in get_llm().stream(prompt):
+            text = chunk_text(piece)
+            if text:
+                yield text
     except ChatServiceError:
         raise
     except Exception as exc:

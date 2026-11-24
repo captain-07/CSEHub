@@ -7,7 +7,7 @@
  * 503/502 when the AI provider is unreachable and never fabricates a reply.
  */
 
-import { apiFetch, ApiError, friendlyError } from './api.js';
+import { apiFetch, apiStream, readServerEvents, ApiError, friendlyError } from './api.js';
 import { initAuth, getAuthState } from './auth-state.js';
 import { escapeHtml, renderAssistantMarkup } from './renderer.js';
 
@@ -310,6 +310,43 @@ function hideTypingIndicator() {
   document.querySelector('#chat-typing')?.remove();
 }
 
+/**
+ * An assistant bubble that grows as the reply arrives.
+ *
+ * The text stays plain while it streams: re-rendering markdown on every token
+ * would flicker, and a half-arrived fenced code block would be re-parsed on
+ * each pass. The finished text is handed to the shared renderer once, so the
+ * reply that lands is the same markup a stored reply produces.
+ */
+function beginStreamingReply() {
+  const container = document.querySelector('#chat-messages');
+  if (!container) return null;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-message assistant chat-message-streaming';
+  bubble.innerHTML = '<div class="chat-stream-text"></div>';
+  container.appendChild(bubble);
+  scrollToBottom();
+  return bubble;
+}
+
+function updateStreamingReply(bubble, text) {
+  const body = bubble?.querySelector('.chat-stream-text');
+  if (!body) return;
+  // textContent, not innerHTML: the model's words are text, never markup.
+  body.textContent = text;
+  scrollToBottom();
+}
+
+function finishStreamingReply(bubble, text) {
+  const body = bubble?.querySelector('.chat-stream-text');
+  if (!body) return;
+  bubble.classList.remove('chat-message-streaming');
+  body.innerHTML = renderAssistantMarkup(text);
+  bindChatCodeBlocks(bubble);
+  scrollToBottom();
+}
+
 async function loadConversationHistory() {
   const container = document.querySelector('#chat-messages');
   if (!container) return;
@@ -378,25 +415,68 @@ async function handleSendMessage() {
   sendBtn.setAttribute('aria-busy', 'true');
   showTypingIndicator();
 
+  // The reply bubble is created only once the server answers, so a refused
+  // request leaves no empty bubble behind it.
+  let reply = null;
+  let received = '';
+
   try {
-    const data = await apiFetch(`/articles/${encodeURIComponent(activeArticleSlug)}/ask/`, {
+    const response = await apiStream(`/articles/${encodeURIComponent(activeArticleSlug)}/ask/stream/`, {
       method: 'POST',
       body: { question },
     });
 
     hideTypingIndicator();
+    reply = beginStreamingReply();
 
-    // The endpoint returns the whole conversation, so the last assistant message
-    // is the new answer.
-    const replies = (data?.messages || []).filter((message) => message.role === 'assistant');
-    const latest = replies[replies.length - 1];
-    appendMessage('assistant', latest?.content || 'The assistant did not return an answer. Please try rephrasing your question.');
+    let failure = null;
+    for await (const event of readServerEvents(response)) {
+      if (event.type === 'delta' && typeof event.text === 'string') {
+        received += event.text;
+        updateStreamingReply(reply, received);
+      } else if (event.type === 'error') {
+        // The reply had already started, so the server could not change its
+        // status. The failure travels in the stream instead.
+        failure = event;
+        break;
+      } else if (event.type === 'done' && Array.isArray(event.conversation?.messages)) {
+        // The stored reply is authoritative — it is exactly what the history
+        // endpoint will return next time this drawer opens.
+        const stored = event.conversation.messages.filter((message) => message.role === 'assistant');
+        const latest = stored[stored.length - 1];
+        if (latest?.content) received = latest.content;
+      }
+    }
+
+    if (received) {
+      finishStreamingReply(reply, received);
+    } else {
+      reply?.remove();
+    }
+
+    if (failure) {
+      const message = failure.code === 'chat_unavailable'
+        ? 'The assistant is not configured or is temporarily unavailable. Please try again shortly.'
+        : (failure.detail || 'The assistant was interrupted. Please ask again.');
+      throw new ApiError(message, 0, failure);
+    }
+
+    if (!received) {
+      appendMessage('error', 'The assistant did not return an answer. Please try rephrasing your question.');
+    }
   } catch (error) {
     console.error('AI chat failed:', error);
     hideTypingIndicator();
-    // The question bubble stays visible; the failure is shown as a distinct,
-    // clearly non-answer bubble rather than being hidden.
-    appendMessage('error', chatErrorMessage(error));
+    if (!received) {
+      // Nothing arrived: the bubble would be empty, so replace it with the
+      // failure rather than leaving a blank reply on screen.
+      reply?.remove();
+      appendMessage('error', chatErrorMessage(error));
+    } else {
+      // Part of the reply did arrive. Keep it — it is what the model wrote —
+      // and say plainly that it stopped early.
+      appendMessage('error', `The reply stopped early. ${chatErrorMessage(error)}`);
+    }
   } finally {
     busy = false;
     input.disabled = false;

@@ -148,6 +148,30 @@ body.chat-open {
   margin-top: var(--space-3xs);
 }
 
+/* A reply that is still arriving. `pre-wrap` keeps the model's own line breaks
+ * while the text is plain; the finished reply is re-rendered as markdown and
+ * drops this class, so the caret is the only difference on screen. */
+.chat-message-streaming .chat-stream-text {
+  white-space: pre-wrap;
+}
+
+.chat-message-streaming .chat-stream-text::after {
+  content: '';
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 0.15ch;
+  vertical-align: text-bottom;
+  background-color: var(--text-secondary);
+  animation: chat-caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes chat-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* Assistant replies are markdown. js/renderer.js maps fenced code, inline code,
  * emphasis and lists onto these element types — no new class names, so the
  * reply stays inside the same escaped allow-list as the rest of the site. */
