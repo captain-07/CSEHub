@@ -171,7 +171,13 @@ export async function apiStream(endpoint, options = {}) {
   const { timeout = DEFAULT_TIMEOUT_MS, ...request } = options;
 
   const headers = new Headers(request.headers || {});
-  if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
+  if (!headers.has('Accept')) {
+    // JSON is offered as well: a refusal writes a JSON body, and a proxy or
+    // framework that only speaks JSON must still be able to answer. DRF
+    // negotiates before the view runs, so the second type is what keeps a
+    // stream request from being rejected as unacceptable.
+    headers.set('Accept', 'text/event-stream, application/json');
+  }
 
   try {
     const token = await getSessionToken();

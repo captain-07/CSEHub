@@ -6,6 +6,8 @@ from django.http import Http404, StreamingHttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.negotiation import DefaultContentNegotiation
+from rest_framework.exceptions import NotAcceptable
 from rest_framework import status
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
@@ -214,6 +216,25 @@ def _stream_events(article, conversation, first, pieces):
     yield _sse({'type': 'done', 'conversation': _conversation_payload(conversation, messages)})
 
 
+class EventStreamNegotiation(DefaultContentNegotiation):
+    """Let a client ask for `text/event-stream` and still reach the handler.
+
+    DRF negotiates against its renderers *before* the view method runs, and
+    those renderers only know JSON. A browser sending `Accept: text/event-stream`
+    was therefore answered 406 — the SSE endpoint never got the chance to reply
+    in the media type it exists to serve. The body is built by hand rather than
+    rendered, so an Accept header no renderer claims is not a failure here:
+    fall back to the first renderer, which is the JSON one a refused request
+    (402/404/503) still needs.
+    """
+
+    def select_renderer(self, request, renderers, format_suffix=None):
+        try:
+            return super().select_renderer(request, renderers, format_suffix)
+        except NotAcceptable:
+            return renderers[0], renderers[0].media_type
+
+
 class AskArticleStreamView(APIView):
     """The same assistant as `AskArticleView`, replying in pieces.
 
@@ -226,6 +247,7 @@ class AskArticleStreamView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
+    content_negotiation_class = EventStreamNegotiation
 
     @extend_schema(
         request=AskQuestionSerializer,

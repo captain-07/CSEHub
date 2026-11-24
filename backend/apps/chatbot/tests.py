@@ -142,6 +142,29 @@ class StreamingChatTests(APITestCase):
         self.assertFalse(response.streaming)
         self.assertFalse(Message.objects.exists())
 
+    @patch('apps.chatbot.views.stream_answer', return_value=iter(['Hello']))
+    def test_the_client_may_ask_for_a_stream_with_its_accept_header(self, stream):
+        """DRF negotiates *before* the handler runs.
+
+        A browser asking a stream for `Accept: text/event-stream` was answered
+        406 ("Could not satisfy the request Accept header") because the only
+        renderers DRF knows are JSON — the handler never ran, so the whole
+        assistant looked broken in the browser while every test passed (the
+        Django test client sends `Accept: */*`). The two media types below are
+        exactly what `apiStream()` sends.
+        """
+        self.client.force_authenticate(self.user)
+        response = self.client.post(
+            self.url,
+            {'question': 'Why?'},
+            format='json',
+            HTTP_ACCEPT='text/event-stream, application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response['Content-Type'].startswith('text/event-stream'))
+        self.assertEqual(read_frames(response)[0], {'type': 'delta', 'text': 'Hello'})
+
     @patch('apps.chatbot.views.stream_answer', return_value=iter(['Hello', ' there']))
     def test_the_reply_arrives_in_pieces_and_is_stored_whole(self, stream):
         self.client.force_authenticate(self.user)
