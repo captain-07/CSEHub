@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -7,6 +8,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from rest_framework.test import APITestCase
 
@@ -14,6 +16,7 @@ from apps.articles.models import Article
 from .llm import build_llm
 from .models import Conversation, Message
 from .rag_chat import ChatServiceError, _response_text, answer_question, get_llm
+from .views import HISTORY_TURNS
 
 
 class ChatTests(APITestCase):
@@ -48,6 +51,37 @@ class ChatTests(APITestCase):
         self.assertEqual(history.status_code, 200)
         self.assertEqual(sorted(history.data.keys()), sorted(response.data.keys()))
         self.assertEqual(len(history.data['messages']), 2)
+
+    @patch('apps.chatbot.views.answer_question', return_value='ok')
+    def test_the_model_sees_only_the_recent_history(self, answer):
+        """Six messages is the continuity budget.
+
+        The window is resent with every question, so a longer transcript is a
+        per-question token cost rather than a feature. The newest turns are the
+        ones kept, in order.
+        """
+        self.client.force_authenticate(self.user)
+        conversation = Conversation.objects.create(user=self.user, article=self.article)
+        base = timezone.now() - timedelta(minutes=20)
+        for index in range(8):
+            message = Message.objects.create(
+                conversation=conversation,
+                role='user' if index % 2 == 0 else 'assistant',
+                content=f'message-{index}',
+            )
+            # auto_now_add stamps every row in the same instant.
+            Message.objects.filter(pk=message.pk).update(
+                created_at=base + timedelta(minutes=index)
+            )
+
+        self.client.post('/api/articles/article/ask/', {'question': 'latest'}, format='json')
+
+        history = answer.call_args.kwargs['history']
+        self.assertEqual(len(history), HISTORY_TURNS)
+        self.assertEqual(
+            [message.content for message in history],
+            [f'message-{index}' for index in range(8 - HISTORY_TURNS, 8)],
+        )
 
     def test_conversation_history_is_empty_but_well_formed_for_new_user(self):
         self.client.force_authenticate(self.other)
@@ -366,6 +400,12 @@ class AnswerQuestionTests(TestCase):
         messages = get_llm.return_value.invoke.call_args[0][0]
         self.assertIn('A node holds a value and a pointer.', messages[0].content)
         self.assertNotIn('No part of this article matched', messages[0].content)
+        # The retrieval budget is part of the per-question cost: raising it
+        # resends more context on every ask.
+        self.assertEqual(
+            get_vectorstore.return_value.similarity_search.call_args.kwargs['k'],
+            3,
+        )
         # Stored rows arrive as turns, so a follow-up is understood as a
         # follow-up rather than as a quoted transcript inside a new question.
         self.assertEqual(
@@ -416,7 +456,7 @@ class AssistantModelTests(TestCase):
     @patch('apps.chatbot.rag_chat.build_llm')
     def test_the_assistant_asks_for_a_length_ceiling(self, build_llm):
         get_llm()
-        self.assertEqual(build_llm.call_args.kwargs['max_tokens'], 800)
+        self.assertEqual(build_llm.call_args.kwargs['max_tokens'], 500)
 
     @patch('apps.chatbot.rag_chat.build_llm')
     def test_the_assistant_uses_the_chat_model(self, build_llm):
@@ -432,8 +472,8 @@ class AssistantModelTests(TestCase):
     @override_settings(GEMINI_API_KEY='test-key')
     @patch('apps.chatbot.llm.ChatGoogleGenerativeAI')
     def test_the_client_receives_the_ceiling(self, client):
-        build_llm(max_tokens=800)
-        self.assertEqual(client.call_args.kwargs['max_tokens'], 800)
+        build_llm(max_tokens=500)
+        self.assertEqual(client.call_args.kwargs['max_tokens'], 500)
 
     @override_settings(GEMINI_API_KEY='test-key')
     @patch('apps.chatbot.llm.ChatGoogleGenerativeAI')

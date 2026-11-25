@@ -58,7 +58,7 @@ SYSTEM_PROMPT = PromptTemplate(
 )
 
 
-def get_llm(*, temperature=0.3, timeout=30, max_tokens=800):
+def get_llm(*, temperature=0.3, timeout=30, max_tokens=500):
     """Return the assistant's Gemini client.
 
     Kept as a thin wrapper so existing callers and tests can patch
@@ -131,13 +131,17 @@ def _history_messages(history):
     return messages
 
 
-def _messages_for(article, question: str, history=None, k: int = 4) -> list:
+def _messages_for(article, question: str, history=None, k: int = 3) -> list:
     """Retrieve the article's own context and build the chat messages.
 
     Shared by the whole-answer and streaming paths so the tutor rules, the
     article scoping of retrieval and the no-match marker cannot drift between
     them — a reader must get the same answer whether it arrives at once or in
     pieces.
+
+    `k` is the per-question retrieval budget. Every ask resends the retrieved
+    context, so this is the cost lever that matters most; three chunks still
+    cover a focused question, and a fourth mostly repeats them.
     """
     try:
         vectorstore = get_vectorstore()
@@ -179,7 +183,7 @@ def _messages_for(article, question: str, history=None, k: int = 4) -> list:
     ]
 
 
-def answer_question(article, question: str, history=None, k: int = 4) -> str:
+def answer_question(article, question: str, history=None, k: int = 3) -> str:
     """Answer `question` about `article`, preferring the article but not limited to it.
 
     Retrieval is scoped to the article's own vectors. When nothing matches, the
@@ -197,7 +201,7 @@ def answer_question(article, question: str, history=None, k: int = 4) -> str:
         raise ChatServiceError("The learning service is temporarily unavailable.") from exc
 
 
-def stream_answer(article, question: str, history=None, k: int = 4):
+def stream_answer(article, question: str, history=None, k: int = 3):
     """Yield the answer in pieces, as the model writes it.
 
     A failure before the first piece raises `ChatServiceError`, so the caller can

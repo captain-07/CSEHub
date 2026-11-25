@@ -20,9 +20,12 @@ from .throttling import ChatBurstThrottle, ChatDailyThrottle
 
 logger = logging.getLogger(__name__)
 
-# How much of the conversation the model sees. Shared by both ask routes so a
-# reader's second question arrives with the same continuity as their first.
-HISTORY_TURNS = 10
+# How much of the conversation the model sees. Six messages (three exchanges)
+# buys continuity for a follow-up; a longer window is resent on every question
+# and buys little, so it is a token cost rather than a quality feature. Shared
+# by both ask routes so a reader's second question arrives with the same
+# continuity as their first.
+HISTORY_TURNS = 6
 
 
 def _published_article(slug):
