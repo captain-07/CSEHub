@@ -3,9 +3,10 @@
  *
  * Stateless by design: the server hands back up to five randomly ordered
  * questions, the reader answers them one at a time, and one POST returns a
- * score. Nothing is stored, so there is no "already taken" state, no login gate
- * and no retry limit. Clicking "Try again" fetches a fresh set, which is what
- * makes the order change between attempts.
+ * score. Nothing is stored — not on the server, not in `localStorage` — so
+ * there is no "already taken" state, no login gate and no retry limit, and the
+ * page never claims anything about earlier attempts. Clicking "Try again"
+ * fetches a fresh set, which is what makes the order change between attempts.
  */
 
 import { friendlyError } from './api.js';
@@ -25,64 +26,6 @@ const DIFFICULTY_LABELS = {
   intermediate: 'Intermediate',
   advanced: 'Advanced',
 };
-
-// The reader's own running total, kept on this device and nowhere else. The
-// quiz is stateless, so this is a courtesy rather than a record the server could
-// be asked about; questions are drawn randomly, so the same question can be
-// counted twice — hence "answers", not "questions".
-const TALLY_PREFIX = 'csehub-quiz-tally:';
-
-function tallyKey(article) {
-  return TALLY_PREFIX + String(article?.slug || article?.id || '');
-}
-
-function readTally(article) {
-  try {
-    const raw = localStorage.getItem(tallyKey(article));
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    const attempts = Number(data?.attempts) || 0;
-    const correct = Number(data?.correct) || 0;
-    const answered = Number(data?.answered) || 0;
-    if (!attempts || !answered) return null;
-    return { attempts, correct, answered };
-  } catch {
-    return null;
-  }
-}
-
-function recordTally(article, score, total) {
-  const previous = readTally(article) || { attempts: 0, correct: 0, answered: 0 };
-  const safeTotal = Math.max(0, Number(total) || 0);
-  const next = {
-    attempts: previous.attempts + 1,
-    correct: previous.correct + Math.max(0, Math.min(Number(score) || 0, safeTotal)),
-    answered: previous.answered + safeTotal,
-  };
-  try {
-    localStorage.setItem(tallyKey(article), JSON.stringify(next));
-  } catch {
-    // Private mode or a full quota: the score on screen still stands, and an
-    // unrecorded attempt is not worth telling the reader about.
-  }
-  return next;
-}
-
-function tallySentence(tally) {
-  if (!tally) return '';
-  const percent = Math.round((tally.correct / tally.answered) * 100);
-  const attempts = `${tally.attempts} attempt${tally.attempts === 1 ? '' : 's'}`;
-  return `${tally.correct} of ${tally.answered} answers right in ${attempts} on this device (${percent}%).`;
-}
-
-/** The line on the article's quiz card, hidden until there is something to say. */
-function renderTally(article) {
-  const el = document.querySelector('#quiz-tally');
-  if (!el) return;
-  const tally = readTally(article);
-  el.textContent = tallySentence(tally);
-  el.hidden = !tally;
-}
 
 function difficultyBadgeMarkup(question) {
   const value = String(question?.difficulty || '').toLowerCase();
@@ -104,7 +47,6 @@ export function initQuiz(shell, article) {
   if (!section || !start || !modal || !panel) return;
 
   if (subtitle) subtitle.textContent = article.title || '';
-  renderTally(article);
 
   const closeQuiz = () => {
     if (modal.open) modal.close();
@@ -399,9 +341,6 @@ function renderResult(result) {
   const score = Number(result?.score) || 0;
   const total = Number(result?.total) || 0;
   const percent = Number(result?.percent) || 0;
-  // Recorded before the panel is replaced so the article's card behind the
-  // dialog already shows the new total when the reader closes it.
-  const tally = total > 0 ? recordTally(quizState.article, score, total) : null;
 
   const byId = new Map(questions.map((question) => [Number(question.id), question]));
   const optionText = (question, optionId) => {
@@ -433,7 +372,6 @@ function renderResult(result) {
       <h3 class="quiz-result-title" tabindex="-1">
         You scored ${score} / ${total} (${percent}%)
       </h3>
-      ${tally ? `<p class="quiz-result-tally">${escapeHtml(tallySentence(tally))}</p>` : ''}
       <ul class="quiz-result-list">${review}</ul>
       <div class="quiz-actions">
         <button class="button button-primary" type="button" data-quiz-action="retry">Try again</button>
@@ -443,5 +381,4 @@ function renderResult(result) {
 
   panel.scrollTop = 0;
   panel.querySelector('.quiz-result-title')?.focus();
-  renderTally(quizState?.article);
 }

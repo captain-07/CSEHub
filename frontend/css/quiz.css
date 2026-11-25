@@ -221,23 +221,6 @@ body.quiz-open {
   background-color: var(--error-soft);
 }
 
-/* This browser's running total, on the card and under the score. */
-.quiz-tally {
-  margin: 0.9rem 0 0;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-
-.quiz-tally[hidden] {
-  display: none !important;
-}
-
-.quiz-result-tally {
-  margin: 0 0 1rem;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-
 .quiz-options {
   display: grid;
   gap: 0.5rem;
