@@ -24,7 +24,7 @@ import {
   createCategory, deleteCategory, createTag, deleteTag,
   uploadImage, normalizePage,
 } from './api/articles.js';
-import { friendlyError } from './api.js';
+import { apiFetch, friendlyError } from './api.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
   videoMarkup, highlightSnippets,
@@ -260,6 +260,8 @@ function parseRoute() {
 }
 
 let currentRoute = null;
+let routeSequence = 0;
+let pendingStatus = null;
 
 /** Guards against a slow request for a view the user has already navigated away from. */
 function routeIsCurrent(route) {
@@ -273,7 +275,8 @@ function isSameForm(a, b) {
 
 async function renderRoute() {
   const route = parseRoute();
-  currentRoute = `${route.view}:${route.id ?? ''}`;
+  routeSequence += 1;
+  currentRoute = `${route.view}:${route.id ?? ''}:${routeSequence}`;
 
   // Every view replaces `#admin-app`, so the editor instance has to be released
   // here rather than in each renderer. Previously only the taxonomy and form
@@ -1167,7 +1170,12 @@ async function renderArticleForm(id) {
   // armed, which is the case where losing work would hurt most.
   markClean();
   app.innerHTML = loadingMarkup(id ? 'Loading article…' : 'Preparing editor…');
-  statusMessage('');
+  if (pendingStatus) {
+    statusMessage(pendingStatus.text, pendingStatus.kind);
+    pendingStatus = null;
+  } else {
+    statusMessage('');
+  }
 
   try {
     await loadTaxonomy();
@@ -1698,16 +1706,17 @@ async function saveArticle(event, article) {
       /* ignore */
     }
 
-    statusMessage(
-      payload.is_published
+    pendingStatus = {
+      text: payload.is_published
         ? 'Saved and published. Update the AI index so the assistant can read it.'
         : 'Saved as a draft.',
-      'success'
-    );
+      kind: 'success',
+    };
 
     // Route to the saved article so a refresh does not create a duplicate.
+    // `navigate` triggers `renderRoute` (directly if already on this hash, or
+    // via `hashchange` when moving from #/articles/new).
     navigate(`#/articles/${saved.id}/edit`);
-    await renderRoute();
   } catch (error) {
     statusMessage(`Unable to save: ${friendlyError(error)}`, 'error');
     restoreSaveButton();
