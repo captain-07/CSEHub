@@ -941,7 +941,9 @@ function articleFormMarkup(article) {
               <label class="field-label" for="f-title">Article Title<span class="field-required" aria-hidden="true">*</span></label>
               <input class="input admin-editor-title-input" id="f-title" name="title" required value="${escapeHtml(article?.title || '')}" placeholder="Article Title…" autocomplete="off" />
               <!-- The URL a save would produce, before it is produced. The
-                   server's answer is authoritative: a taken slug becomes `-2`. -->
+                   server's answer is authoritative: a taken slug gets a numeric
+                   suffix. Do not put backticks in this comment: it sits inside a
+                   template literal, and one would end the string early. -->
               <div class="slug-preview" id="slug-preview" hidden>
                 <span class="slug-preview-label">Public URL</span>
                 <code class="slug-preview-url" id="slug-preview-url"></code>
