@@ -276,6 +276,47 @@
   white-space: nowrap;
 }
 
+/* --- User administration ----------------------------------------------- */
+
+.user-role {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.user-role-admin {
+  color: var(--accent);
+}
+
+.user-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.user-state::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.user-state-active { color: var(--success); }
+.user-state-banned { color: var(--error); }
+
+.user-ban-reason {
+  display: block;
+  margin-top: var(--space-3xs);
+  color: var(--error);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
 /* --- Section navigation ----------------------------------------------- */
 
 .admin-nav {

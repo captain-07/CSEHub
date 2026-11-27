@@ -1,7 +1,8 @@
 import ipaddress
 
 from django.db import IntegrityError
-from django.db.models import Q
+from django.db.models import Max, Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics
@@ -10,11 +11,15 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import UserSession, active_session_cutoff, session_active_window_minutes
+from .models import User, UserSession, active_session_cutoff, session_active_window_minutes
 from .serializers import (
+    AdminUserSerializer,
+    AdminUserSummarySerializer,
+    BanUserSerializer,
     SessionEndResultSerializer,
     SessionKeySerializer,
     SessionPingResultSerializer,
+    UserBanResultSerializer,
     UserProfileSerializer,
     UserSessionSerializer,
     UserSessionSummarySerializer,
@@ -273,3 +278,142 @@ class UserSessionSummaryView(APIView):
             'active_window_minutes': session_active_window_minutes(),
         }
         return Response(UserSessionSummarySerializer(payload).data)
+
+
+# --- Account administration -------------------------------------------------
+#
+# A ban is a local decision enforced by `SupabaseJWTAuthentication` on every
+# request. The project deliberately has no Supabase service-role key, so it
+# cannot revoke the provider session itself; refusing the token here is what
+# makes the ban effective for this API, and closing the login-session rows keeps
+# the admin's "active now" list honest.
+
+
+def _ban_result(user, ended_sessions=0):
+    return {
+        'id': user.pk,
+        'is_banned': user.is_banned,
+        'banned_at': user.banned_at,
+        'ban_reason': user.ban_reason,
+        'ended_sessions': ended_sessions,
+    }
+
+
+class AdminUserListView(generics.ListAPIView):
+    """Every account, for the admin panel's ban/unban controls."""
+
+    permission_classes = [IsAdminUser]
+    serializer_class = AdminUserSerializer
+
+    @extend_schema(
+        summary='List user accounts',
+        description=(
+            'Admin only. `?status=banned` keeps banned accounts and '
+            '`?status=active` the rest; `?search=` matches email, username or '
+            'display name. `last_seen_at` is the newest login heartbeat.'
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    def get_queryset(self):
+        queryset = User.objects.annotate(
+            last_seen_at=Max('login_sessions__last_seen_at'),
+        )
+        status_filter = self.request.query_params.get('status', '').strip()
+
+        if status_filter == 'banned':
+            queryset = queryset.filter(is_banned=True)
+        elif status_filter == 'active':
+            queryset = queryset.filter(is_banned=False)
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(email__icontains=search)
+                | Q(username__icontains=search)
+                | Q(display_name__icontains=search)
+            )
+
+        return queryset.order_by('-date_joined', '-id')
+
+
+class UserBanView(APIView):
+    """Ban an account and close any session it still has open.
+
+    Staff accounts and the caller's own account are refused: the panel is for
+    readers, and an editor who locks themselves out has no way back in through
+    it. Re-banning an already banned account is a no-op rather than an error.
+    """
+
+    permission_classes = [IsAdminUser]
+
+    @extend_schema(
+        request=BanUserSerializer,
+        responses={200: UserBanResultSerializer},
+        summary='Ban a user account',
+        description=(
+            'Admin only. The optional `reason` is shown in the account list. '
+            'Every open login session is closed at the same time.'
+        ),
+    )
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+
+        if user.pk == request.user.pk:
+            raise ValidationError(
+                {'detail': 'You cannot ban your own account.'}
+            )
+        if user.is_staff or user.is_superuser:
+            raise ValidationError(
+                {'detail': 'Staff accounts cannot be banned here.'}
+            )
+
+        serializer = BanUserSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        if user.is_banned:
+            return Response(UserBanResultSerializer(_ban_result(user)).data)
+
+        ended = user.ban(serializer.validated_data.get('reason', ''))
+        return Response(UserBanResultSerializer(_ban_result(user, ended)).data)
+
+
+class UserUnbanView(APIView):
+    """Restore an account's access. Sessions closed by the ban stay closed."""
+
+    permission_classes = [IsAdminUser]
+
+    @extend_schema(
+        request=None,
+        responses={200: UserBanResultSerializer},
+        summary='Unban a user account',
+        description='Admin only. Unbanning an account that is not banned is a no-op.',
+    )
+    def post(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+
+        if not user.is_banned:
+            return Response(UserBanResultSerializer(_ban_result(user)).data)
+
+        user.unban()
+        return Response(UserBanResultSerializer(_ban_result(user)).data)
+
+
+class AdminUserSummaryView(APIView):
+    """Counts for the top of the account list."""
+
+    permission_classes = [IsAdminUser]
+
+    @extend_schema(
+        responses={200: AdminUserSummarySerializer},
+        summary='Summarise user accounts',
+        description='Admin only. Total accounts, banned accounts and staff accounts.',
+    )
+    def get(self, request):
+        payload = {
+            'total': User.objects.count(),
+            'banned': User.objects.filter(is_banned=True).count(),
+            'admins': User.objects.filter(is_staff=True).count(),
+        }
+        return Response(AdminUserSummarySerializer(payload).data)

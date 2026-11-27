@@ -6,9 +6,11 @@ from .models import User, UserSession
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ['email', 'username', 'is_staff', 'supabase_uid']
+    list_display = ['email', 'username', 'is_staff', 'is_banned', 'supabase_uid']
+    list_filter = BaseUserAdmin.list_filter + ('is_banned',)
     fieldsets = BaseUserAdmin.fieldsets + (
         ('Supabase', {'fields': ('supabase_uid', 'avatar_url', 'display_name')}),
+        ('Moderation', {'fields': ('is_banned', 'banned_at', 'ban_reason')}),
     )
 
 

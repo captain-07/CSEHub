@@ -43,7 +43,7 @@ One implementation per concern:
 | Concern          | File                                          |
 | ---------------- | --------------------------------------------- |
 | HTTP client      | `js/api.js`                                   |
-| Endpoint bindings| `js/api/articles.js`, `js/api/session.js` |
+| Endpoint bindings| `js/api/articles.js`, `js/api/session.js`, `js/api/users.js` |
 | Supabase client  | `js/supabase.js`                              |
 | Auth state       | `js/auth-state.js`                            |
 | OAuth / logout   | `js/auth.js`                                  |
@@ -86,6 +86,16 @@ tab refreshes the same login rather than inventing one. A closed tab cannot send
 a logout, so the backend treats a session with no heartbeat for
 `SESSION_ACTIVE_WINDOW_MINUTES` (default 30) as expired. The admin panel's
 `#/logins` page lists active sessions and the full history.
+
+### Banning accounts
+
+`js/api/users.js` backs the admin panel's `#/users` page. A ban is a backend
+flag enforced on every authenticated request, so it takes effect on the reader's
+next call rather than when their Supabase token expires; the panel also closes
+their open login sessions. Banning is admin-only, and the panel and the server
+both refuse to ban the signed-in editor or another staff account. The optional
+reason is shown beside the account. Unbanning restores access but does not reopen
+sessions that were ended by the ban.
 
 ### XSS
 

@@ -119,6 +119,10 @@ class SupabaseJWTAuthentication(BaseAuthentication):
                     raise AuthenticationFailed(
                         'This email is already linked to another sign-in account'
                     )
+            if user.is_banned:
+                # Enforced on every request rather than only at sign-in: the
+                # ban must also stop a token that was issued before the ban.
+                raise AuthenticationFailed('This account has been banned')
             if not created:
                 # Supabase UID is the stable identity. Keep local email in sync if changed,
                 # but preserve user profile customizations (username, display_name, avatar_url).

@@ -16,6 +16,48 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ['email', 'is_admin']
 
 
+class AdminUserSerializer(serializers.ModelSerializer):
+    """One account in the admin panel's user list.
+
+    `last_seen_at` comes from the newest login session, annotated by the view;
+    it answers "are they still around?" without a second request per row.
+    """
+
+    is_admin = serializers.BooleanField(source='is_staff', read_only=True)
+    last_seen_at = serializers.DateTimeField(allow_null=True, read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'email', 'username', 'display_name', 'avatar_url',
+            'is_admin', 'is_banned', 'banned_at', 'ban_reason',
+            'date_joined', 'last_seen_at',
+        ]
+        read_only_fields = fields
+
+
+class BanUserSerializer(serializers.Serializer):
+    """The optional note an admin attaches to a ban."""
+
+    reason = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, default='',
+    )
+
+
+class UserBanResultSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    is_banned = serializers.BooleanField()
+    banned_at = serializers.DateTimeField(allow_null=True)
+    ban_reason = serializers.CharField(allow_blank=True)
+    ended_sessions = serializers.IntegerField()
+
+
+class AdminUserSummarySerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    banned = serializers.IntegerField()
+    admins = serializers.IntegerField()
+
+
 class SessionKeySerializer(serializers.Serializer):
     """The fallback identifier for clients whose token carries no `session_id`.
 

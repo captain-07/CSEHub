@@ -27,6 +27,7 @@ import {
 } from './api/articles.js';
 import { apiFetch, friendlyError } from './api.js';
 import { getSessions, getSessionSummary } from './api/session.js';
+import { getUsers, getUserSummary, banUser, unbanUser } from './api/users.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
   videoMarkup, highlightSnippets,
@@ -109,12 +110,13 @@ function installUnloadGuard() {
  */
 async function confirmDiscard() {
   if (!isDirty()) return true;
-  return confirmAction({
+  const { confirmed } = await confirmAction({
     title: 'Discard unsaved changes?',
     message: 'This article has changes that have not been saved. Leaving this page will lose them.',
     confirmLabel: 'Discard changes',
     destructive: true,
   });
+  return confirmed;
 }
 
 /**
@@ -156,8 +158,15 @@ function failureMarkup(message) {
     </div>`;
 }
 
-/** Replaces window.confirm so the panel has one consistent confirmation style. */
-function confirmAction({ title, message, confirmLabel = 'Confirm', destructive = false }) {
+/** Replaces window.confirm so the panel has one consistent confirmation style.
+ *
+ * Resolves `{ confirmed, value }`. `value` is the trimmed text of the optional
+ * `input` field (empty without one), so a caller that only needs the verdict
+ * destructures `confirmed`.
+ */
+function confirmAction({
+  title, message, confirmLabel = 'Confirm', destructive = false, input = null,
+}) {
   return new Promise((resolve) => {
     const existing = document.querySelector('#confirm-modal');
     if (existing) existing.remove();
@@ -165,6 +174,13 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
     // The trigger regains focus on close, so keyboard users resume where they
     // left off instead of falling to <body>.
     const opener = document.activeElement;
+
+    const inputMarkup = input
+      ? `<label class="field">
+           <span class="field-label">${escapeHtml(input.label || 'Reason')}</span>
+           <input type="text" maxlength="${Number(input.maxLength) || 255}" placeholder="${escapeHtml(input.placeholder || '')}" data-confirm-input />
+         </label>`
+      : '';
 
     const modal = document.createElement('div');
     modal.id = 'confirm-modal';
@@ -174,6 +190,7 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
         <div class="modal-body">
           <h2 id="confirm-title">${escapeHtml(title)}</h2>
           <p class="confirm-message">${escapeHtml(message)}</p>
+          ${inputMarkup}
           <div class="admin-toolbar">
             <button class="button button-secondary" type="button" data-cancel>Cancel</button>
             <button class="button ${destructive ? 'button-danger' : 'button-primary'}" type="button" data-confirm>${escapeHtml(confirmLabel)}</button>
@@ -181,11 +198,13 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
         </div>
       </div>`;
 
-    const close = (result) => {
+    const close = (confirmed) => {
+      const field = modal.querySelector('[data-confirm-input]');
+      const value = confirmed && field ? field.value.trim() : '';
       modal.remove();
       document.removeEventListener('keydown', onKey);
       opener?.focus?.();
-      resolve(result);
+      resolve({ confirmed, value });
     };
     const onKey = (event) => {
       if (event.key === 'Escape') close(false);
@@ -195,11 +214,17 @@ function confirmAction({ title, message, confirmLabel = 'Confirm', destructive =
     document.body.appendChild(modal);
     modal.querySelector('[data-cancel]').addEventListener('click', () => close(false));
     modal.querySelector('[data-confirm]').addEventListener('click', () => close(true));
+    modal.querySelector('[data-confirm-input]')?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        close(true);
+      }
+    });
     modal.addEventListener('click', (event) => {
       if (event.target === modal) close(false);
     });
     document.addEventListener('keydown', onKey);
-    modal.querySelector('[data-confirm]').focus();
+    (modal.querySelector('[data-confirm-input]') || modal.querySelector('[data-confirm]')).focus();
   });
 }
 
@@ -226,8 +251,8 @@ function trapFocus(modal, event) {
 }
 
 async function notify(title, message, kind = 'info') {
-  const ok = await confirmAction({ title, message, confirmLabel: 'OK', destructive: kind === 'error' });
-  if (ok) statusMessage(title, kind === 'error' ? 'error' : 'success');
+  const { confirmed } = await confirmAction({ title, message, confirmLabel: 'OK', destructive: kind === 'error' });
+  if (confirmed) statusMessage(title, kind === 'error' ? 'error' : 'success');
 }
 
 /* ---------------------------------------------------------------- routing */
@@ -252,6 +277,7 @@ function parseRoute() {
   if (!segments.length) return { view: 'dashboard' };
   if (segments[0] === 'taxonomy' && segments.length === 1) return { view: 'taxonomy' };
   if (segments[0] === 'logins' && segments.length === 1) return { view: 'logins' };
+  if (segments[0] === 'users' && segments.length === 1) return { view: 'users' };
 
   if (segments[0] === 'articles') {
     if (segments.length === 1) return { view: 'articles' };
@@ -292,6 +318,7 @@ async function renderRoute() {
     articles: renderArticleList,
     taxonomy: renderTaxonomy,
     logins: renderLoginLog,
+    users: renderUsers,
     'article-form': () => renderArticleForm(route.id),
   };
 
@@ -366,6 +393,7 @@ function adminNav(active) {
       ${link('#/articles/new', 'New article')}
       ${link('#/taxonomy', 'Categories & tags')}
       ${link('#/logins', 'Login log')}
+      ${link('#/users', 'Users')}
     </nav>`;
 }
 
@@ -501,6 +529,7 @@ function dashboardMarkup({ articles, total }) {
       <a class="button button-primary" href="#/articles/new">+ Write new article</a>
       <a class="button button-secondary" href="#/taxonomy">Manage categories &amp; tags</a>
       <a class="button button-secondary" href="#/logins">View login log</a>
+      <a class="button button-secondary" href="#/users">Manage users</a>
       <a class="button button-secondary" href="articles.html" target="_blank" rel="noopener">View public library ↗</a>
     </div>
 
@@ -545,14 +574,14 @@ async function renderDashboard() {
 
 async function togglePublish(id, isPublished) {
   const verb = isPublished ? 'unpublish' : 'publish';
-  const ok = await confirmAction({
+  const { confirmed } = await confirmAction({
     title: isPublished ? 'Unpublish this article?' : 'Publish this article?',
     message: isPublished
       ? 'It will no longer be visible to readers or indexed for the AI assistant.'
       : 'It will become publicly visible. Remember to update the AI index afterwards.',
     confirmLabel: isPublished ? 'Unpublish' : 'Publish',
   });
-  if (!ok) return;
+  if (!confirmed) return;
 
   try {
     await updateArticle(id, { is_published: !isPublished });
@@ -564,13 +593,13 @@ async function togglePublish(id, isPublished) {
 }
 
 async function removeArticle(id, title) {
-  const ok = await confirmAction({
+  const { confirmed } = await confirmAction({
     title: 'Delete this article?',
     message: `"${title}" will be permanently removed, including its content. This cannot be undone.`,
     confirmLabel: 'Delete permanently',
     destructive: true,
   });
-  if (!ok) return;
+  if (!confirmed) return;
 
   try {
     await deleteArticle(id);
@@ -927,6 +956,219 @@ async function renderLoginLog() {
   }
 }
 
+/* ------------------------------------------------------------- user admin */
+
+function userStateFromQuery() {
+  const query = new URLSearchParams(window.location.search);
+  const status = query.get('user_status');
+  return {
+    search: query.get('user_q') || '',
+    status: ['active', 'banned'].includes(status) ? status : '',
+    page: Math.max(1, Number(query.get('user_page')) || 1),
+  };
+}
+
+function userRoleMarkup(user) {
+  return user.is_admin
+    ? '<span class="user-role user-role-admin">Admin</span>'
+    : '<span class="user-role">Reader</span>';
+}
+
+function userStatusMarkup(user) {
+  if (user.is_banned) {
+    const when = user.banned_at
+      ? ` title="Banned ${escapeHtml(formatDateTime(user.banned_at))}"`
+      : '';
+    return `<span class="user-state user-state-banned"${when}>Banned</span>`;
+  }
+  return '<span class="user-state user-state-active">Active</span>';
+}
+
+function userActionMarkup(user) {
+  // Staff are refused by the server too; hiding the button keeps the reason
+  // from reading like a failed click.
+  if (user.is_admin) return '<span class="admin-note">Staff</span>';
+  if (user.is_banned) {
+    return `<button class="button button-secondary" type="button" data-unban-user="${user.id}" data-name="${escapeHtml(user.display_name || user.username || user.email)}">Unban</button>`;
+  }
+  return `<button class="button button-danger" type="button" data-ban-user="${user.id}" data-name="${escapeHtml(user.display_name || user.username || user.email)}">Ban</button>`;
+}
+
+function userRow(user) {
+  const name = user.display_name || user.username || user.email || 'Unknown user';
+  const reason = user.is_banned && user.ban_reason
+    ? `<small class="user-ban-reason">${escapeHtml(user.ban_reason)}</small>`
+    : '';
+  return `
+    <tr>
+      <td>
+        <div class="admin-user-cell">
+          <strong>${escapeHtml(name)}</strong>
+          <small>${escapeHtml(user.email || '')}</small>
+          ${reason}
+        </div>
+      </td>
+      <td>${userRoleMarkup(user)}</td>
+      <td>${userStatusMarkup(user)}</td>
+      <td>${sessionTimeMarkup(user.last_seen_at)}</td>
+      <td>${sessionTimeMarkup(user.date_joined)}</td>
+      <td>${userActionMarkup(user)}</td>
+    </tr>`;
+}
+
+function usersMarkup({ summary, page, state, total }) {
+  const first = (state.page - 1) * LIST_PAGE_SIZE + 1;
+  const last = Math.min(state.page * LIST_PAGE_SIZE, total);
+
+  const href = (pageNumber) => {
+    const params = new URLSearchParams();
+    if (state.search) params.set('user_q', state.search);
+    if (state.status) params.set('user_status', state.status);
+    if (pageNumber > 1) params.set('user_page', String(pageNumber));
+    const query = params.toString();
+    return `admin.html${query ? `?${query}` : ''}#/users`;
+  };
+
+  return `
+    ${adminNav('Users')}
+    <section class="admin-heading">
+      <div>
+        <p class="eyebrow">CSEHub accounts</p>
+        <h1>Users</h1>
+      </div>
+      <button class="button button-secondary" type="button" id="refresh-users">Refresh</button>
+    </section>
+
+    <section class="admin-stats">
+      ${statCard('Total accounts', summary.total)}
+      ${statCard('Banned', summary.banned)}
+      ${statCard('Staff', summary.admins)}
+    </section>
+
+    <section class="admin-panel">
+      <form class="filters admin-filters" id="user-filters" role="search">
+        <label class="search-field">
+          <span class="sr-only">Search accounts</span>
+          <input name="q" type="search" value="${escapeHtml(state.search)}" placeholder="Search by name, username or email" autocomplete="off" />
+        </label>
+        <label>
+          <span class="sr-only">Account status</span>
+          <select name="status">
+            <option value=""${state.status === '' ? ' selected' : ''}>All accounts</option>
+            <option value="active"${state.status === 'active' ? ' selected' : ''}>Active</option>
+            <option value="banned"${state.status === 'banned' ? ' selected' : ''}>Banned</option>
+          </select>
+        </label>
+        <button class="button button-primary" type="submit">Filter</button>
+      </form>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr><th>User</th><th>Role</th><th>Status</th><th>Last seen</th><th>Joined</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${page.results.map(userRow).join('') || '<tr><td colspan="6">No accounts match this filter.</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      ${total > LIST_PAGE_SIZE ? `
+        <nav class="pagination" aria-label="User pages">
+          ${state.page > 1
+            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">← Previous</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">← Previous</span>'}
+          <span class="pagination-status">Showing ${first}–${last} of ${total}</span>
+          ${page.next
+            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next →</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next →</span>'}
+        </nav>` : ''}
+    </section>`;
+}
+
+async function banUserAccount(id, name) {
+  const { confirmed, value } = await confirmAction({
+    title: `Ban ${name}?`,
+    message: 'They are signed out immediately and cannot use the site until you unban them. Their login history is kept.',
+    confirmLabel: 'Ban account',
+    destructive: true,
+    input: {
+      label: 'Reason (optional)',
+      placeholder: 'e.g. spam or abusive comments',
+      maxLength: 255,
+    },
+  });
+  if (!confirmed) return;
+
+  try {
+    await banUser(id, value);
+    statusMessage(`${name} has been banned.`, 'success');
+    await renderRoute();
+  } catch (error) {
+    await notify('Could not ban this account', friendlyError(error), 'error');
+  }
+}
+
+async function unbanUserAccount(id, name) {
+  const { confirmed } = await confirmAction({
+    title: `Unban ${name}?`,
+    message: 'They will be able to sign in and use the site again.',
+    confirmLabel: 'Unban',
+  });
+  if (!confirmed) return;
+
+  try {
+    await unbanUser(id);
+    statusMessage(`${name} has been unbanned.`, 'success');
+    await renderRoute();
+  } catch (error) {
+    await notify('Could not unban this account', friendlyError(error), 'error');
+  }
+}
+
+async function renderUsers() {
+  const route = currentRoute;
+  const state = userStateFromQuery();
+  app.innerHTML = loadingMarkup('Loading accounts…');
+
+  try {
+    const filters = { page: state.page };
+    if (state.status) filters.status = state.status;
+    if (state.search) filters.search = state.search;
+
+    const [summary, usersPage] = await Promise.all([
+      getUserSummary(),
+      getUsers(filters),
+    ]);
+    if (!routeIsCurrent(route)) return;
+
+    const page = normalizePage(usersPage);
+    app.innerHTML = usersMarkup({ summary, page, state, total: page.count });
+
+    document.querySelector('#user-filters')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const params = new URLSearchParams();
+      const search = form.elements.q.value.trim();
+      const status = form.elements.status.value;
+      if (search) params.set('user_q', search);
+      if (status) params.set('user_status', status);
+      const query = params.toString();
+      window.location.href = `admin.html${query ? `?${query}` : ''}#/users`;
+    });
+
+    document.querySelector('#refresh-users')?.addEventListener('click', () => renderRoute());
+
+    app.querySelectorAll('[data-ban-user]').forEach((button) => {
+      button.addEventListener('click', () => banUserAccount(button.dataset.banUser, button.dataset.name));
+    });
+    app.querySelectorAll('[data-unban-user]').forEach((button) => {
+      button.addEventListener('click', () => unbanUserAccount(button.dataset.unbanUser, button.dataset.name));
+    });
+  } catch (error) {
+    if (!routeIsCurrent(route)) return;
+    app.innerHTML = failureMarkup(friendlyError(error));
+  }
+}
+
 /* ---------------------------------------------------------- taxonomy mgmt */
 
 function taxonomyMarkup() {
@@ -1071,13 +1313,13 @@ async function removeTaxonomy(kind, id, name) {
   const message = kind === 'category'
     ? `"${name}" will be removed and its articles become uncategorised. A category that still has tags cannot be deleted.`
     : `"${name}" will be removed. Articles using it simply lose that tag.`;
-  const ok = await confirmAction({
+  const { confirmed } = await confirmAction({
     title: `Delete this ${kind}?`,
     message,
     confirmLabel: 'Delete',
     destructive: true,
   });
-  if (!ok) return;
+  if (!confirmed) return;
 
   try {
     if (kind === 'category') await deleteCategory(id);
@@ -2293,7 +2535,7 @@ async function deleteQuizQuestionFromReview(modal, state, card) {
   const question = state.questions.find((row) => row.id === questionId);
   if (!question) return;
 
-  const confirmed = await confirmAction({
+  const { confirmed } = await confirmAction({
     title: 'Delete this question?',
     message: "This removes it from the article's question bank. This cannot be undone.",
     confirmLabel: 'Delete question',

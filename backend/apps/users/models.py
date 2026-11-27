@@ -13,11 +13,44 @@ class User(AbstractUser):
     avatar_url = models.URLField(blank=True)
     display_name = models.CharField(max_length=100, blank=True)
 
+    # A ban is deliberately separate from Django's `is_active`. `is_active` is a
+    # general account switch (and the Django admin's own), while `is_banned`
+    # records an editorial decision with a time and a reason, and is what the
+    # admin panel can undo without guessing whether the account was disabled for
+    # some other purpose.
+    is_banned = models.BooleanField(default=False)
+    banned_at = models.DateTimeField(null=True, blank=True)
+    ban_reason = models.CharField(max_length=255, blank=True)
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
 
     def __str__(self):
         return self.email
+
+    def ban(self, reason=''):
+        """Lock the account out and close every session it still has open.
+
+        Authentication is checked on every request, so the next API call from a
+        banned reader is refused even though Supabase will keep honouring their
+        token until it expires. Closing the local session rows keeps the login
+        log from claiming a banned reader is still online.
+        """
+        self.is_banned = True
+        self.banned_at = timezone.now()
+        self.ban_reason = (reason or '')[:255]
+        self.save(update_fields=['is_banned', 'banned_at', 'ban_reason'])
+        return self.login_sessions.filter(logged_out_at__isnull=True).update(
+            logged_out_at=self.banned_at,
+        )
+
+    def unban(self):
+        """Restore access. Sessions closed by the ban stay closed."""
+        self.is_banned = False
+        self.banned_at = None
+        self.ban_reason = ''
+        self.save(update_fields=['is_banned', 'banned_at', 'ban_reason'])
+        return self
 
 
 def session_active_window_minutes():
