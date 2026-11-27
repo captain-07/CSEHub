@@ -1,6 +1,7 @@
 import { getSupabase } from './supabase.js';
 import { apiFetch, ApiError } from './api.js';
 import { consumePostLoginRedirect } from './auth.js';
+import { pingSession } from './api/session.js';
 
 /**
  * Single source of truth for authentication state.
@@ -27,6 +28,55 @@ const listeners = new Set();
 
 function emit() {
   listeners.forEach((listener) => listener(state));
+}
+
+/* ------------------------------------------------------- login session log */
+
+/**
+ * The admin panel's login log is only as truthful as this heartbeat.
+ *
+ * A session row is created on the first ping after sign-in and refreshed while
+ * the page is open. Ten minutes keeps a 30-minute active window alive through
+ * two missed beats, which is what a throttled background tab can cost; the
+ * backend treats anything older than that window as ended because a closed tab
+ * has no way to say goodbye.
+ */
+const HEARTBEAT_MS = 10 * 60 * 1000;
+const PING_THROTTLE_MS = 60 * 1000;
+let heartbeatTimer = null;
+let lastPingAt = 0;
+
+async function pingLoginSession() {
+  if (!state.user) return;
+  const now = Date.now();
+  // Every page load pings once; rapid auth events (a token refresh, a second
+  // profile sync) must not turn into a request each.
+  if (now - lastPingAt < PING_THROTTLE_MS) return;
+  lastPingAt = now;
+
+  try {
+    await pingSession();
+  } catch (error) {
+    // Tracking is a side feature. A failed ping must never make a signed-in
+    // reader look signed out or block the page that is loading.
+    console.warn('Login session tracking failed', error);
+  }
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(pingLoginSession, HEARTBEAT_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pingLoginSession();
+  });
 }
 
 async function hydrate(session) {
@@ -69,6 +119,9 @@ async function hydrate(session) {
   state.ready = true;
   emit();
 
+  // Fire-and-forget: the page does not wait on a log write.
+  pingLoginSession();
+
   applyPendingRedirect();
   return state;
 }
@@ -101,12 +154,22 @@ export async function initAuth() {
     const { data, error } = await supabase.auth.getSession();
     if (error) console.warn('Unable to read Supabase session', error);
     await hydrate(data.session);
+    startHeartbeat();
 
     supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
+        stopHeartbeat();
+        lastPingAt = 0;
         state = { ready: true, user: null, profile: null, profileError: null, status: 'anonymous' };
         emit();
         return;
+      }
+      // A fresh sign-in must be recorded even if this tab pinged a moment ago
+      // for a different session, and a sign-out followed by a sign-in in the
+      // same tab has to restart the heartbeat that SIGNED_OUT stopped.
+      if (event === 'SIGNED_IN') {
+        lastPingAt = 0;
+        startHeartbeat();
       }
       hydrate(session);
     });

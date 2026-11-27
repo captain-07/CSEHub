@@ -64,6 +64,12 @@ class SupabaseJWTAuthentication(BaseAuthentication):
                 issuer=f"{settings.SUPABASE_URL}/auth/v1",
             )
 
+            # Keep the verified claims available to views that need more than
+            # the user row — `session_id` is what lets a login be recorded once
+            # rather than once per request. The signature has already been
+            # checked above, so a view can trust these values.
+            request.supabase_claims = payload
+
             supabase_uid = payload.get("sub")
 
             if not supabase_uid:

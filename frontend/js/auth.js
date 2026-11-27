@@ -1,4 +1,5 @@
 import { getSupabase } from './supabase.js';
+import { endSession } from './api/session.js';
 
 // Only same-origin, first-party pages may be used as a post-login destination.
 // Anything absolute, protocol-relative ("//evil.com"), or otherwise unexpected is
@@ -96,6 +97,17 @@ export async function loginWithGoogle({ redirectTo } = {}) {
 export async function logoutUser() {
   const supabase = getSupabase();
   if (!supabase) return;
+
+  // Record the sign-out while the bearer token still exists. This has to run
+  // before `signOut()` clears it, or the endpoint answers 401 and the session
+  // would linger until the active-window cutoff. A failure here must not stop
+  // the reader from signing out.
+  try {
+    await endSession();
+  } catch (error) {
+    console.warn('Could not record sign-out', error);
+  }
+
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 

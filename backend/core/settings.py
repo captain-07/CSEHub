@@ -28,6 +28,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 SUPABASE_URL = env('SUPABASE_URL', default='')
 DJANGO_SUPERUSER_EMAIL = env('DJANGO_SUPERUSER_EMAIL', default='')
 
+# A login session stays "active" while its browser heartbeat is this fresh.
+# The frontend pings every 10 minutes, so 30 minutes tolerates two missed beats
+# (a throttled background tab) without leaving a closed browser looking online.
+SESSION_ACTIVE_WINDOW_MINUTES = env.int('SESSION_ACTIVE_WINDOW_MINUTES', default=30)
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/

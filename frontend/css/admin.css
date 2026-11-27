@@ -210,6 +210,72 @@
   margin-top: var(--space-sm);
 }
 
+.results-heading .admin-note {
+  margin-top: 0;
+}
+
+/* --- Login log --------------------------------------------------------- */
+
+.admin-user-cell {
+  line-height: 1.35;
+}
+
+.admin-user-cell strong {
+  display: block;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.admin-user-cell small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* A login session is active while its heartbeat is fresh, so the state is a
+   live fact rather than a stored flag — the dot mirrors the article status
+   pill so the two admin tables read the same way. */
+.session-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.session-state::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.session-state-active { color: var(--success); }
+.session-state-ended { color: var(--text-secondary); }
+
+.session-ip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.session-device {
+  display: inline-block;
+  max-width: 20rem;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.admin-duration {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* --- Section navigation ----------------------------------------------- */
 
 .admin-nav {

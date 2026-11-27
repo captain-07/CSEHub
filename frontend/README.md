@@ -43,7 +43,7 @@ One implementation per concern:
 | Concern          | File                                          |
 | ---------------- | --------------------------------------------- |
 | HTTP client      | `js/api.js`                                   |
-| Endpoint bindings| `js/api/articles.js`                          |
+| Endpoint bindings| `js/api/articles.js`, `js/api/session.js` |
 | Supabase client  | `js/supabase.js`                              |
 | Auth state       | `js/auth-state.js`                            |
 | OAuth / logout   | `js/auth.js`                                  |
@@ -75,6 +75,17 @@ Two block types are local tools rather than CDN packages:
   `items: [{ content }]`. list 2.x throws while rendering it; list 1.x renders
   and re-saves it as `[object Object]`. `js/editor-tools/list-block.js` adapts
   list 1.x at the boundary so the stored schema is unchanged.
+
+### Login sessions
+
+`js/api/session.js` is the client half of the admin login log. `auth-state.js`
+pings on page load, on tab focus and every 10 minutes while signed in, and
+`auth.js` ends the session *before* `supabase.auth.signOut()` clears the bearer
+token. The backend keys rows by Supabase's `session_id`, so a refresh or a second
+tab refreshes the same login rather than inventing one. A closed tab cannot send
+a logout, so the backend treats a session with no heartbeat for
+`SESSION_ACTIVE_WINDOW_MINUTES` (default 30) as expired. The admin panel's
+`#/logins` page lists active sessions and the full history.
 
 ### XSS
 

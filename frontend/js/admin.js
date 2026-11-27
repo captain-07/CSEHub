@@ -13,6 +13,7 @@
  *   #/articles/new         create article
  *   #/articles/:id/edit    edit article
  *   #/taxonomy             categories & tags
+ *   #/logins               login log and active sessions
  */
 
 import { initNavbar } from './navbar.js';
@@ -25,6 +26,7 @@ import {
   uploadImage, normalizePage,
 } from './api/articles.js';
 import { apiFetch, friendlyError } from './api.js';
+import { getSessions, getSessionSummary } from './api/session.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
   videoMarkup, highlightSnippets,
@@ -249,6 +251,7 @@ function parseRoute() {
 
   if (!segments.length) return { view: 'dashboard' };
   if (segments[0] === 'taxonomy' && segments.length === 1) return { view: 'taxonomy' };
+  if (segments[0] === 'logins' && segments.length === 1) return { view: 'logins' };
 
   if (segments[0] === 'articles') {
     if (segments.length === 1) return { view: 'articles' };
@@ -288,6 +291,7 @@ async function renderRoute() {
     dashboard: renderDashboard,
     articles: renderArticleList,
     taxonomy: renderTaxonomy,
+    logins: renderLoginLog,
     'article-form': () => renderArticleForm(route.id),
   };
 
@@ -361,6 +365,7 @@ function adminNav(active) {
       ${link('#/articles', 'Articles')}
       ${link('#/articles/new', 'New article')}
       ${link('#/taxonomy', 'Categories & tags')}
+      ${link('#/logins', 'Login log')}
     </nav>`;
 }
 
@@ -495,6 +500,7 @@ function dashboardMarkup({ articles, total }) {
     <div class="admin-quick-actions">
       <a class="button button-primary" href="#/articles/new">+ Write new article</a>
       <a class="button button-secondary" href="#/taxonomy">Manage categories &amp; tags</a>
+      <a class="button button-secondary" href="#/logins">View login log</a>
       <a class="button button-secondary" href="articles.html" target="_blank" rel="noopener">View public library ↗</a>
     </div>
 
@@ -677,6 +683,244 @@ async function renderArticleList() {
       const query = params.toString();
       window.location.href = `admin.html${query ? `?${query}` : ''}#/articles`;
     });
+  } catch (error) {
+    if (!routeIsCurrent(route)) return;
+    app.innerHTML = failureMarkup(friendlyError(error));
+  }
+}
+
+/* ------------------------------------------------------------- login log */
+
+function loginStateFromQuery() {
+  const query = new URLSearchParams(window.location.search);
+  const status = query.get('login_status');
+  return {
+    search: query.get('login_q') || '',
+    status: ['active', 'ended'].includes(status) ? status : '',
+    page: Math.max(1, Number(query.get('login_page')) || 1),
+  };
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('en', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+function sessionUserMarkup(session) {
+  const name = session.display_name || session.username || session.email || 'Unknown user';
+  const email = session.email || '';
+  // The name links to the account list with this reader already filtered, so
+  // "who is online" and "ban this account" are one click apart.
+  const href = `admin.html?user_q=${encodeURIComponent(email)}#/users`;
+  return `
+    <div class="admin-user-cell">
+      <strong><a href="${href}">${escapeHtml(name)}</a></strong>
+      <small>${escapeHtml(email)}</small>
+    </div>`;
+}
+
+function sessionStateMarkup(session) {
+  if (session.is_active) {
+    return '<span class="session-state session-state-active">Active</span>';
+  }
+  // A row with no logout was a tab that closed (or a token that lapsed); it is
+  // not the same fact as a reader pressing "Logout", so the table says which.
+  return session.logged_out_at
+    ? '<span class="session-state session-state-ended">Signed out</span>'
+    : '<span class="session-state session-state-ended">Expired</span>';
+}
+
+function sessionIpMarkup(session) {
+  return `<span class="session-ip">${escapeHtml(session.ip_address || '—')}</span>`;
+}
+
+function sessionDeviceMarkup(session) {
+  const agent = session.user_agent || '';
+  if (!agent) return '<span class="session-device">Unknown device</span>';
+  // The full string is kept in `title`; the cell shows enough to recognise the
+  // browser without turning the table into a wall of platform tokens.
+  const short = agent.length > 64 ? `${agent.slice(0, 61)}…` : agent;
+  return `<span class="session-device" title="${escapeHtml(agent)}">${escapeHtml(short)}</span>`;
+}
+
+function sessionTimeMarkup(value) {
+  return `<time class="admin-date" datetime="${escapeHtml(value || '')}">${escapeHtml(formatDateTime(value))}</time>`;
+}
+
+function activeSessionRow(session) {
+  return `
+    <tr>
+      <td>${sessionUserMarkup(session)}</td>
+      <td>${sessionTimeMarkup(session.logged_in_at)}</td>
+      <td>${sessionTimeMarkup(session.last_seen_at)}</td>
+      <td>${sessionIpMarkup(session)}</td>
+      <td>${sessionDeviceMarkup(session)}</td>
+    </tr>`;
+}
+
+function sessionHistoryRow(session) {
+  return `
+    <tr>
+      <td>${sessionUserMarkup(session)}</td>
+      <td>${sessionStateMarkup(session)}</td>
+      <td>${sessionTimeMarkup(session.logged_in_at)}</td>
+      <td>${sessionTimeMarkup(session.logged_out_at)}</td>
+      <td class="admin-duration">${escapeHtml(formatDuration(session.duration_seconds))}</td>
+      <td>${sessionIpMarkup(session)}</td>
+      <td>${sessionDeviceMarkup(session)}</td>
+    </tr>`;
+}
+
+function loginLogMarkup({ summary, active, page, state, total }) {
+  const first = (state.page - 1) * LIST_PAGE_SIZE + 1;
+  const last = Math.min(state.page * LIST_PAGE_SIZE, total);
+
+  // Same query-param convention as the article list, prefixed so the two views
+  // can share one URL without reading each other's page number.
+  const href = (pageNumber) => {
+    const params = new URLSearchParams();
+    if (state.search) params.set('login_q', state.search);
+    if (state.status) params.set('login_status', state.status);
+    if (pageNumber > 1) params.set('login_page', String(pageNumber));
+    const query = params.toString();
+    return `admin.html${query ? `?${query}` : ''}#/logins`;
+  };
+
+  const activeRows = active.results.map(activeSessionRow).join('')
+    || '<tr><td colspan="5">Nobody is signed in right now.</td></tr>';
+
+  return `
+    ${adminNav('Login log')}
+    <section class="admin-heading">
+      <div>
+        <p class="eyebrow">CSEHub accounts</p>
+        <h1>Login log</h1>
+      </div>
+      <button class="button button-secondary" type="button" id="refresh-logins">Refresh</button>
+    </section>
+
+    <section class="admin-stats">
+      ${statCard('Active sessions', summary.active)}
+      ${statCard('Logins today', summary.logins_today)}
+      ${statCard('Total sessions', summary.total)}
+    </section>
+
+    <section class="admin-panel">
+      <div class="results-heading">
+        <h2>Active sessions</h2>
+        <span class="admin-note">Seen in the last ${escapeHtml(String(summary.active_window_minutes))} minutes</span>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr><th>User</th><th>Signed in</th><th>Last seen</th><th>IP</th><th>Device</th></tr>
+          </thead>
+          <tbody>${activeRows}</tbody>
+        </table>
+      </div>
+      ${summary.active > active.results.length
+        ? `<p class="admin-note">Showing the ${active.results.length} most recently active of ${escapeHtml(String(summary.active))}.</p>`
+        : ''}
+    </section>
+
+    <section class="admin-panel">
+      <h2>Login history</h2>
+      <form class="filters admin-filters" id="login-filters" role="search">
+        <label class="search-field">
+          <span class="sr-only">Search users</span>
+          <input name="q" type="search" value="${escapeHtml(state.search)}" placeholder="Search by name, username or email" autocomplete="off" />
+        </label>
+        <label>
+          <span class="sr-only">Session status</span>
+          <select name="status">
+            <option value=""${state.status === '' ? ' selected' : ''}>All sessions</option>
+            <option value="active"${state.status === 'active' ? ' selected' : ''}>Active</option>
+            <option value="ended"${state.status === 'ended' ? ' selected' : ''}>Ended</option>
+          </select>
+        </label>
+        <button class="button button-primary" type="submit">Filter</button>
+      </form>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr><th>User</th><th>Status</th><th>Signed in</th><th>Signed out</th><th>Duration</th><th>IP</th><th>Device</th></tr>
+          </thead>
+          <tbody>${page.results.map(sessionHistoryRow).join('') || '<tr><td colspan="7">No sign-ins match this filter.</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      ${total > LIST_PAGE_SIZE ? `
+        <nav class="pagination" aria-label="Login history pages">
+          ${state.page > 1
+            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">← Previous</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">← Previous</span>'}
+          <span class="pagination-status">Showing ${first}–${last} of ${total}</span>
+          ${page.next
+            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next →</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next →</span>'}
+        </nav>` : ''}
+    </section>`;
+}
+
+async function renderLoginLog() {
+  const route = currentRoute;
+  const state = loginStateFromQuery();
+  app.innerHTML = loadingMarkup('Loading login activity…');
+
+  try {
+    const filters = { page: state.page };
+    if (state.status) filters.status = state.status;
+    if (state.search) filters.search = state.search;
+
+    const [summary, activePage, historyPage] = await Promise.all([
+      getSessionSummary(),
+      getSessions({ status: 'active' }),
+      getSessions(filters),
+    ]);
+    if (!routeIsCurrent(route)) return;
+
+    const page = normalizePage(historyPage);
+    app.innerHTML = loginLogMarkup({
+      summary,
+      active: normalizePage(activePage),
+      page,
+      state,
+      total: page.count,
+    });
+
+    document.querySelector('#login-filters')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const params = new URLSearchParams();
+      const search = form.elements.q.value.trim();
+      const status = form.elements.status.value;
+      if (search) params.set('login_q', search);
+      if (status) params.set('login_status', status);
+      const query = params.toString();
+      window.location.href = `admin.html${query ? `?${query}` : ''}#/logins`;
+    });
+
+    document.querySelector('#refresh-logins')?.addEventListener('click', () => renderRoute());
   } catch (error) {
     if (!routeIsCurrent(route)) return;
     app.innerHTML = failureMarkup(friendlyError(error));
