@@ -317,6 +317,76 @@
   font-style: italic;
 }
 
+/* --- Payments ----------------------------------------------------------- */
+
+.badge-paid {
+  background-color: var(--success-soft);
+  color: var(--success);
+}
+
+.badge-open {
+  background-color: var(--warning-soft);
+  color: var(--warning);
+}
+
+.badge-failed {
+  background-color: var(--error-soft);
+  color: var(--error);
+}
+
+.badge-refunded {
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.payment-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.payment-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.payment-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
+.payment-muted {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.payment-details {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  gap: var(--space-2xs) var(--space-md);
+  margin: 0;
+}
+
+.payment-details dt {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.payment-details dd {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.modal-payment {
+  width: min(40rem, 100%);
+}
+
 /* --- Section navigation ----------------------------------------------- */
 
 .admin-nav {

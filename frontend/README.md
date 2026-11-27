@@ -43,7 +43,7 @@ One implementation per concern:
 | Concern          | File                                          |
 | ---------------- | --------------------------------------------- |
 | HTTP client      | `js/api.js`                                   |
-| Endpoint bindings| `js/api/articles.js`, `js/api/session.js`, `js/api/users.js` |
+| Endpoint bindings| `js/api/articles.js`, `js/api/session.js`, `js/api/users.js`, `js/api/payments.js` |
 | Supabase client  | `js/supabase.js`                              |
 | Auth state       | `js/auth-state.js`                            |
 | OAuth / logout   | `js/auth.js`                                  |
@@ -96,6 +96,17 @@ their open login sessions. Banning is admin-only, and the panel and the server
 both refuse to ban the signed-in editor or another staff account. The optional
 reason is shown beside the account. Unbanning restores access but does not reopen
 sessions that were ended by the ban.
+
+### Payments
+
+`js/api/payments.js` backs the admin panel's `#/payments` page. It lists every
+checkout attempt — `paid`, `created`, `failed` and `refunded` — with the buyer,
+article, amount, provider ids, receipt and contact, plus stat cards for money
+collected and refunded. A **Details** button opens the full record. The page is
+read-only: a settlement is changed by the checkout/webhook paths, and the Django
+admin's `Purchase` form is the deliberate repair hatch for a webhook that never
+arrived. Amounts are sent as the exact `amount_paise` the provider was told and
+as a formatted `amount`, so the client never recomputes money.
 
 ### XSS
 

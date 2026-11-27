@@ -28,6 +28,7 @@ import {
 import { apiFetch, friendlyError } from './api.js';
 import { getSessions, getSessionSummary } from './api/session.js';
 import { getUsers, getUserSummary, banUser, unbanUser } from './api/users.js';
+import { getPurchases, getPurchaseSummary } from './api/payments.js';
 import {
   renderArticleContent, escapeHtml, safeUrl, formatDate, formatViews, contentToPlainText,
   videoMarkup, highlightSnippets,
@@ -278,6 +279,7 @@ function parseRoute() {
   if (segments[0] === 'taxonomy' && segments.length === 1) return { view: 'taxonomy' };
   if (segments[0] === 'logins' && segments.length === 1) return { view: 'logins' };
   if (segments[0] === 'users' && segments.length === 1) return { view: 'users' };
+  if (segments[0] === 'payments' && segments.length === 1) return { view: 'payments' };
 
   if (segments[0] === 'articles') {
     if (segments.length === 1) return { view: 'articles' };
@@ -319,6 +321,7 @@ async function renderRoute() {
     taxonomy: renderTaxonomy,
     logins: renderLoginLog,
     users: renderUsers,
+    payments: renderPayments,
     'article-form': () => renderArticleForm(route.id),
   };
 
@@ -394,6 +397,7 @@ function adminNav(active) {
       ${link('#/taxonomy', 'Categories & tags')}
       ${link('#/logins', 'Login log')}
       ${link('#/users', 'Users')}
+      ${link('#/payments', 'Payments')}
     </nav>`;
 }
 
@@ -530,6 +534,7 @@ function dashboardMarkup({ articles, total }) {
       <a class="button button-secondary" href="#/taxonomy">Manage categories &amp; tags</a>
       <a class="button button-secondary" href="#/logins">View login log</a>
       <a class="button button-secondary" href="#/users">Manage users</a>
+      <a class="button button-secondary" href="#/payments">View payments</a>
       <a class="button button-secondary" href="articles.html" target="_blank" rel="noopener">View public library ↗</a>
     </div>
 
@@ -1162,6 +1167,272 @@ async function renderUsers() {
     });
     app.querySelectorAll('[data-unban-user]').forEach((button) => {
       button.addEventListener('click', () => unbanUserAccount(button.dataset.unbanUser, button.dataset.name));
+    });
+  } catch (error) {
+    if (!routeIsCurrent(route)) return;
+    app.innerHTML = failureMarkup(friendlyError(error));
+  }
+}
+
+/* -------------------------------------------------------------- payments */
+
+function paymentStateFromQuery() {
+  const query = new URLSearchParams(window.location.search);
+  const status = query.get('payment_status');
+  return {
+    search: query.get('payment_q') || '',
+    status: ['created', 'paid', 'failed', 'refunded'].includes(status) ? status : '',
+    page: Math.max(1, Number(query.get('payment_page')) || 1),
+  };
+}
+
+function formatMoney(paise, currency = 'INR') {
+  const amount = (Number(paise) || 0) / 100;
+  try {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: currency || 'INR',
+    }).format(amount);
+  } catch {
+    return amount.toFixed(2);
+  }
+}
+
+function paymentStatusMarkup(purchase) {
+  switch (purchase.status) {
+    case 'paid':
+      return '<span class="badge badge-paid">Paid</span>';
+    case 'failed':
+      return '<span class="badge badge-failed">Failed</span>';
+    case 'refunded':
+      return '<span class="badge badge-refunded">Refunded</span>';
+    default:
+      return '<span class="badge badge-open">Open</span>';
+  }
+}
+
+function paymentIdMarkup(purchase) {
+  const id = purchase.provider_payment_id;
+  if (!id) return '<span class="payment-id">—</span>';
+  // The full id is kept in `title`; the cell shows enough to recognise a
+  // payment without letting one column set the table's width.
+  const short = id.length > 20 ? `${id.slice(0, 18)}…` : id;
+  return `<span class="payment-id" title="${escapeHtml(id)}">${escapeHtml(short)}</span>`;
+}
+
+function paymentBuyerMarkup(purchase) {
+  const name = purchase.user_display_name || purchase.user_username || purchase.user_email;
+  return `
+    <div class="admin-user-cell">
+      <strong>${escapeHtml(name)}</strong>
+      <small>${escapeHtml(purchase.user_email || '')}</small>
+    </div>`;
+}
+
+function purchaseRow(purchase) {
+  return `
+    <tr>
+      <td>${sessionTimeMarkup(purchase.created_at)}</td>
+      <td>${paymentBuyerMarkup(purchase)}</td>
+      <td>
+        <div class="admin-user-cell">
+          <strong>${escapeHtml(purchase.article_title || 'Unknown article')}</strong>
+          <small>${escapeHtml(purchase.article_slug || '')}</small>
+        </div>
+      </td>
+      <td class="payment-amount">${escapeHtml(formatMoney(purchase.amount_paise, purchase.currency))}</td>
+      <td>${paymentStatusMarkup(purchase)}</td>
+      <td>${paymentIdMarkup(purchase)}</td>
+      <td>
+        <button class="button button-secondary button-sm" type="button" data-purchase-details="${purchase.id}">Details</button>
+      </td>
+    </tr>`;
+}
+
+function paymentsMarkup({ summary, page, state, total }) {
+  const first = (state.page - 1) * LIST_PAGE_SIZE + 1;
+  const last = Math.min(state.page * LIST_PAGE_SIZE, total);
+
+  const href = (pageNumber) => {
+    const params = new URLSearchParams();
+    if (state.search) params.set('payment_q', state.search);
+    if (state.status) params.set('payment_status', state.status);
+    if (pageNumber > 1) params.set('payment_page', String(pageNumber));
+    const query = params.toString();
+    return `admin.html${query ? `?${query}` : ''}#/payments`;
+  };
+
+  return `
+    ${adminNav('Payments')}
+    <section class="admin-heading">
+      <div>
+        <p class="eyebrow">CSEHub revenue</p>
+        <h1>Payments</h1>
+      </div>
+      <button class="button button-secondary" type="button" id="refresh-payments">Refresh</button>
+    </section>
+
+    <section class="admin-stats">
+      ${statCard('Collected', formatMoney(summary.paid_amount_paise))}
+      ${statCard('Paid transactions', summary.paid)}
+      ${statCard('Refunded', formatMoney(summary.refunded_amount_paise))}
+      ${statCard('Open attempts', summary.open)}
+      ${statCard('Failed', summary.failed)}
+    </section>
+
+    <section class="admin-panel">
+      <div class="results-heading">
+        <h2>Transaction log</h2>
+        <span class="admin-note">${escapeHtml(String(summary.total))} attempt(s) recorded</span>
+      </div>
+
+      <form class="filters admin-filters" id="payment-filters" role="search">
+        <label class="search-field">
+          <span class="sr-only">Search transactions</span>
+          <input name="q" type="search" value="${escapeHtml(state.search)}" placeholder="Search buyer, article, order id or receipt" autocomplete="off" />
+        </label>
+        <label>
+          <span class="sr-only">Payment status</span>
+          <select name="status">
+            <option value=""${state.status === '' ? ' selected' : ''}>All statuses</option>
+            <option value="paid"${state.status === 'paid' ? ' selected' : ''}>Paid</option>
+            <option value="created"${state.status === 'created' ? ' selected' : ''}>Open</option>
+            <option value="failed"${state.status === 'failed' ? ' selected' : ''}>Failed</option>
+            <option value="refunded"${state.status === 'refunded' ? ' selected' : ''}>Refunded</option>
+          </select>
+        </label>
+        <button class="button button-primary" type="submit">Filter</button>
+      </form>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr><th>Date</th><th>Buyer</th><th>Article</th><th>Amount</th><th>Status</th><th>Payment</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${page.results.map(purchaseRow).join('') || '<tr><td colspan="7">No transactions match this filter.</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      ${total > LIST_PAGE_SIZE ? `
+        <nav class="pagination" aria-label="Transaction pages">
+          ${state.page > 1
+            ? `<a class="button button-secondary" href="${href(state.page - 1)}" rel="prev">← Previous</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">← Previous</span>'}
+          <span class="pagination-status">Showing ${first}–${last} of ${total}</span>
+          ${page.next
+            ? `<a class="button button-secondary" href="${href(state.page + 1)}" rel="next">Next →</a>`
+            : '<span class="button button-secondary is-disabled" aria-disabled="true">Next →</span>'}
+        </nav>` : ''}
+    </section>`;
+}
+
+function paymentCode(value) {
+  return value
+    ? `<code class="payment-code">${escapeHtml(value)}</code>`
+    : '<span class="payment-id">—</span>';
+}
+
+function purchaseDetailsMarkup(purchase) {
+  const buyer = purchase.user_display_name || purchase.user_username || purchase.user_email;
+  const item = (label, value) => `<dt>${escapeHtml(label)}</dt><dd>${value}</dd>`;
+
+  return `
+    <dl class="payment-details">
+      ${item('Status', paymentStatusMarkup(purchase))}
+      ${item('Buyer', `<strong>${escapeHtml(buyer)}</strong><br><span class="payment-muted">${escapeHtml(purchase.user_email || '')}</span>`)}
+      ${item('Article', `<strong>${escapeHtml(purchase.article_title || 'Unknown article')}</strong><br><span class="payment-muted">/${escapeHtml(purchase.article_slug || '')}</span>`)}
+      ${item('Amount', `<strong>${escapeHtml(formatMoney(purchase.amount_paise, purchase.currency))}</strong> <span class="payment-muted">(${escapeHtml(String(purchase.amount_paise))} paise)</span>`)}
+      ${item('Currency', escapeHtml(purchase.currency || ''))}
+      ${item('Provider', escapeHtml(purchase.provider || ''))}
+      ${item('Order ID', paymentCode(purchase.provider_order_id))}
+      ${item('Payment ID', paymentCode(purchase.provider_payment_id))}
+      ${item('Receipt', paymentCode(purchase.receipt))}
+      ${item('Contact', purchase.contact ? escapeHtml(purchase.contact) : '—')}
+      ${item('Created', escapeHtml(formatDateTime(purchase.created_at)))}
+      ${item('Paid', purchase.paid_at ? escapeHtml(formatDateTime(purchase.paid_at)) : '—')}
+    </dl>`;
+}
+
+function openPurchaseDetails(purchase) {
+  document.querySelector('#purchase-detail-modal')?.remove();
+
+  const opener = document.activeElement;
+  const modal = document.createElement('div');
+  modal.id = 'purchase-detail-modal';
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal modal-payment" role="dialog" aria-modal="true" aria-labelledby="purchase-detail-title">
+      <header class="modal-head">
+        <div>
+          <p class="eyebrow">Payment details</p>
+          <h2 id="purchase-detail-title">Transaction #${escapeHtml(String(purchase.id))}</h2>
+        </div>
+        <button class="button button-secondary button-sm" type="button" data-close>Close</button>
+      </header>
+      <div class="modal-body">${purchaseDetailsMarkup(purchase)}</div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  document.body.style.overflow = 'hidden';
+
+  const close = () => {
+    modal.remove();
+    document.removeEventListener('keydown', onKey);
+    if (!document.querySelector('.modal-backdrop')) document.body.style.overflow = '';
+    opener?.focus?.();
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape') close();
+    if (event.key === 'Tab') trapFocus(modal, event);
+  };
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal || event.target.closest('[data-close]')) close();
+  });
+  document.addEventListener('keydown', onKey);
+  modal.querySelector('[data-close]').focus();
+}
+
+async function renderPayments() {
+  const route = currentRoute;
+  const state = paymentStateFromQuery();
+  app.innerHTML = loadingMarkup('Loading transactions…');
+
+  try {
+    const filters = { page: state.page };
+    if (state.status) filters.status = state.status;
+    if (state.search) filters.search = state.search;
+
+    const [summary, purchasesPage] = await Promise.all([
+      getPurchaseSummary(),
+      getPurchases(filters),
+    ]);
+    if (!routeIsCurrent(route)) return;
+
+    const page = normalizePage(purchasesPage);
+    app.innerHTML = paymentsMarkup({ summary, page, state, total: page.count });
+
+    document.querySelector('#payment-filters')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const params = new URLSearchParams();
+      const search = form.elements.q.value.trim();
+      const status = form.elements.status.value;
+      if (search) params.set('payment_q', search);
+      if (status) params.set('payment_status', status);
+      const query = params.toString();
+      window.location.href = `admin.html${query ? `?${query}` : ''}#/payments`;
+    });
+
+    document.querySelector('#refresh-payments')?.addEventListener('click', () => renderRoute());
+
+    app.querySelectorAll('[data-purchase-details]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const purchase = page.results.find(
+          (row) => String(row.id) === button.dataset.purchaseDetails
+        );
+        if (purchase) openPurchaseDetails(purchase);
+      });
     });
   } catch (error) {
     if (!routeIsCurrent(route)) return;

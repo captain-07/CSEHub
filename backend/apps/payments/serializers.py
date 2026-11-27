@@ -5,6 +5,8 @@ actually carry, and so the request bodies are validated before any provider call
 is made.
 """
 
+from decimal import Decimal
+
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -87,4 +89,47 @@ class MyPurchasesSerializer(serializers.ModelSerializer):
         if not cat:
             return None
         return {'id': cat.id, 'name': cat.name, 'slug': cat.slug}
+
+
+class PurchaseLogSerializer(serializers.ModelSerializer):
+    """One checkout attempt, as the admin transaction log shows it.
+
+    Both the exact `amount_paise` (what the provider was told) and a formatted
+    `amount` (what a human reads) are published: the client should not have to
+    re-derive money from an integer, and the integer must not be lost to
+    rounding on the way out.
+    """
+
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    user_display_name = serializers.CharField(source='user.display_name', read_only=True)
+    article_id = serializers.IntegerField(source='article.id', read_only=True)
+    article_title = serializers.CharField(source='article.title', read_only=True)
+    article_slug = serializers.CharField(source='article.slug', read_only=True)
+    amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Purchase
+        fields = [
+            'id', 'user_id', 'user_email', 'user_username', 'user_display_name',
+            'article_id', 'article_title', 'article_slug',
+            'amount_paise', 'amount', 'currency', 'status', 'provider',
+            'provider_order_id', 'provider_payment_id', 'receipt', 'contact',
+            'created_at', 'paid_at',
+        ]
+
+    @extend_schema_field(serializers.CharField)
+    def get_amount(self, obj):
+        return f'{(Decimal(obj.amount_paise) / 100):.2f}'
+
+
+class PurchaseSummarySerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    paid = serializers.IntegerField()
+    paid_amount_paise = serializers.IntegerField()
+    refunded = serializers.IntegerField()
+    refunded_amount_paise = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    open = serializers.IntegerField()
 

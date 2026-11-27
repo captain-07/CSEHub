@@ -18,10 +18,11 @@ import logging
 from decimal import Decimal
 
 from django.conf import settings
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
-from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -35,6 +36,8 @@ from .serializers import (
     CheckoutSerializer,
     MyPurchasesSerializer,
     PaymentStatusSerializer,
+    PurchaseLogSerializer,
+    PurchaseSummarySerializer,
     VerifyPaymentSerializer,
 )
 
@@ -431,3 +434,90 @@ def _apply_event(event_type, payload):
         return bool(revoked)
 
     return False
+
+
+# --- Admin transaction log --------------------------------------------------
+#
+# These routes read the rows the checkout and webhook paths write. They are
+# deliberately read-only: `Purchase.status` is a settlement fact, and the Django
+# admin's editable field is the repair hatch for a webhook that never arrived.
+
+
+def _is_status(value):
+    return value in dict(Purchase.STATUS_CHOICES)
+
+
+class PurchaseLogListView(generics.ListAPIView):
+    """Every checkout attempt, for the admin's transaction log."""
+
+    permission_classes = [IsAdminUser]
+    serializer_class = PurchaseLogSerializer
+
+    @extend_schema(
+        summary='List payment transactions',
+        description=(
+            'Admin only. `?status=` keeps one of `created`, `paid`, `failed` '
+            'or `refunded`; `?search=` matches the buyer, the article, either '
+            'provider id, the receipt or the contact number.'
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    def get_queryset(self):
+        queryset = Purchase.objects.select_related('user', 'article')
+        status_filter = self.request.query_params.get('status', '').strip()
+        if _is_status(status_filter):
+            queryset = queryset.filter(status=status_filter)
+
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(user__email__icontains=search)
+                | Q(user__username__icontains=search)
+                | Q(user__display_name__icontains=search)
+                | Q(article__title__icontains=search)
+                | Q(article__slug__icontains=search)
+                | Q(provider_order_id__icontains=search)
+                | Q(provider_payment_id__icontains=search)
+                | Q(receipt__icontains=search)
+                | Q(contact__icontains=search)
+            )
+
+        return queryset.order_by('-created_at', '-id')
+
+
+class PurchaseSummaryView(APIView):
+    """Totals for the transaction log's stat cards."""
+
+    permission_classes = [IsAdminUser]
+
+    @extend_schema(
+        responses={200: PurchaseSummarySerializer},
+        summary='Summarise payment transactions',
+        description='Admin only. Counts and collected/refunded amounts in paise.',
+    )
+    def get(self, request):
+        totals = Purchase.objects.aggregate(
+            total=Count('id'),
+            paid=Count('id', filter=Q(status=Purchase.STATUS_PAID)),
+            paid_amount_paise=Sum(
+                'amount_paise', filter=Q(status=Purchase.STATUS_PAID),
+            ),
+            refunded=Count('id', filter=Q(status=Purchase.STATUS_REFUNDED)),
+            refunded_amount_paise=Sum(
+                'amount_paise', filter=Q(status=Purchase.STATUS_REFUNDED),
+            ),
+            failed=Count('id', filter=Q(status=Purchase.STATUS_FAILED)),
+            open=Count('id', filter=Q(status=Purchase.STATUS_CREATED)),
+        )
+        payload = {
+            'total': totals['total'] or 0,
+            'paid': totals['paid'] or 0,
+            'paid_amount_paise': totals['paid_amount_paise'] or 0,
+            'refunded': totals['refunded'] or 0,
+            'refunded_amount_paise': totals['refunded_amount_paise'] or 0,
+            'failed': totals['failed'] or 0,
+            'open': totals['open'] or 0,
+        }
+        return Response(PurchaseSummarySerializer(payload).data)
