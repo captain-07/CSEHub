@@ -1891,14 +1891,22 @@ function buildEditor(initialData) {
     );
   }
 
+  // Editor.js emits `onChange` while it renders the initial document. Treating
+  // that as an edit marked a freshly opened article dirty, so leaving it — even
+  // to "New article" — raised a discard prompt for work that did not exist.
+  let ready = false;
+
   return new window.EditorJS({
     holder: 'editorjs',
     data: initialData,
     placeholder: 'Write the lesson…',
     tools: toolStatus.tools,
+    onReady: () => {
+      ready = true;
+    },
     // Typing in the body has to count as unsaved work just like editing a field.
     onChange: () => {
-      formIsDirty = true;
+      if (ready) formIsDirty = true;
     },
   });
 }
@@ -2001,6 +2009,11 @@ async function renderArticleForm(id) {
     if (reviewQuizBtn) reviewQuizBtn.addEventListener('click', () => openQuizReview(article));
 
     setupArticleFormInteractions(form, article);
+    // The editor and the form's own setup can emit input/change events while
+    // they populate. A freshly opened form is not an unsaved draft, so the
+    // guard must start clean — otherwise "New article" prompts to discard a
+    // document the author never touched.
+    markClean();
   } catch (error) {
     if (!routeIsCurrent(route)) return;
     app.innerHTML = failureMarkup(friendlyError(error));
@@ -3118,18 +3131,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!(await guard())) return;
 
   if (!window.location.hash) window.location.hash = '#/';
+
+  installUnloadGuard();
+
+  // A hash change that arrives while the first view is still loading has no
+  // listener yet, so it used to be dropped: the panel finished rendering the
+  // route it started with while the URL named the new one — exactly the state
+  // that makes "New article" look like it reopened the article being edited.
+  // Render once, then reconcile if the URL moved underneath that render.
+  const hashAtBoot = window.location.hash;
   await renderRoute();
+  if (window.location.hash !== hashAtBoot) await renderRoute();
 
   // The route as it was *before* a `hashchange`, since `parseRoute` can only
   // report the destination once the hash has already changed.
   let leavingFrom = parseRoute();
-
-  installUnloadGuard();
+  // Set while a cancelled navigation is being rolled back. Restoring the old
+  // URL fires `hashchange` again, and re-rendering there would discard the
+  // unsaved work the author just chose to keep.
+  let skipNextHashRender = false;
 
   // `hashchange` covers in-app anchor clicks and browser back/forward alike,
   // which is where the unsaved-changes prompt belongs: `beforeunload` never
   // fires for a hash change.
   window.addEventListener('hashchange', async () => {
+    if (skipNextHashRender) {
+      skipNextHashRender = false;
+      return;
+    }
+
     const next = parseRoute();
 
     // Only prompt when the author is actually leaving the article they loaded,
@@ -3137,11 +3167,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (leavingFrom.view === 'article-form' && !isSameForm(leavingFrom, next)) {
       const discard = await confirmDiscard();
       if (!discard) {
-        // Restoring the hash fires this handler again; the form was never
-        // re-rendered, so the guard is now inert and it renders straight back.
-        window.location.hash = leavingFrom.id === null
+        const restore = leavingFrom.id === null
           ? '#/articles/new'
           : `#/articles/${leavingFrom.id}/edit`;
+        if (window.location.hash !== restore) {
+          skipNextHashRender = true;
+          window.location.hash = restore;
+        }
         return;
       }
       markClean();
