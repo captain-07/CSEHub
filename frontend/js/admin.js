@@ -256,6 +256,21 @@ async function notify(title, message, kind = 'info') {
   if (confirmed) statusMessage(title, kind === 'error' ? 'error' : 'success');
 }
 
+/**
+ * Rejects a promise that takes longer than `ms`.
+ *
+ * `apiFetch` bounds the wait for response headers, but reading the body is
+ * unbounded. A long provider call can therefore leave a button disabled after
+ * the response has started; this is the ceiling the UI waits on.
+ */
+function withTimeout(promise, ms, message) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /* ---------------------------------------------------------------- routing */
 
 /**
@@ -2484,21 +2499,36 @@ async function saveArticle(event, article) {
 
 async function reindex(article) {
   const btn = document.querySelector('#reindex-btn');
+  if (!btn || btn.disabled) return;
+
+  const restore = () => {
+    if (!document.body.contains(btn)) return;
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.textContent = 'Update AI index';
+  };
+
   btn.disabled = true;
-  btn.textContent = 'Indexing…';
+  btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="button-spinner" aria-hidden="true"></span> Indexing…';
   statusMessage('Sending this article to the vector store…');
 
   try {
-    const result = await reindexArticle(article.id);
+    const result = await withTimeout(
+      reindexArticle(article.id),
+      120_000,
+      'Indexing did not finish in time. It may still complete in the background — refresh in a moment to check.',
+    );
     statusMessage(`AI index updated — ${result.chunks} chunks embedded.`, 'success');
   } catch (error) {
+    // Restore first: the error dialog is modal, and the button must not sit
+    // disabled behind it while the author reads the message.
+    restore();
     await notify('AI indexing failed', friendlyError(error), 'error');
-  } finally {
-    if (document.body.contains(btn)) {
-      btn.disabled = false;
-      btn.textContent = 'Update AI index';
-    }
+    return;
   }
+
+  restore();
 }
 
 /* ------------------------------------------------------------ quiz review */

@@ -95,9 +95,18 @@ export async function uploadImage(file) {
   return payload?.url || '';
 }
 
-/** Pushes an article's content into the vector store for the AI assistant. */
+/**
+ * Pushes an article's content into the vector store for the AI assistant.
+ *
+ * Embedding every chunk and writing the vectors is slower than an ordinary API
+ * call, so this gets its own ceiling instead of the 30 s default. Without it a
+ * large article looks like a frozen button.
+ */
 export function reindexArticle(id) {
-  return apiFetch(`/articles/${encodeURIComponent(id)}/reindex/`, { method: 'POST' });
+  return apiFetch(`/articles/${encodeURIComponent(id)}/reindex/`, {
+    method: 'POST',
+    timeout: 120_000,
+  });
 }
 
 /**
