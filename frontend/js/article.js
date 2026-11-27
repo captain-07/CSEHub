@@ -487,7 +487,11 @@ function initPaywall(shell, article, signedIn) {
       if (button.disabled) return;
       const label = button.textContent;
       button.disabled = true;
-      button.textContent = 'Opening checkout…';
+      button.setAttribute('aria-busy', 'true');
+      // A spinner is the only signal that the click registered while the order
+      // is created and the provider's script loads; without it the label alone
+      // looks frozen.
+      button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span> Opening checkout…';
 
       try {
         const result = await buyArticle(article);
@@ -508,6 +512,7 @@ function initPaywall(shell, article, signedIn) {
       }
 
       button.disabled = false;
+      button.removeAttribute('aria-busy');
       button.textContent = label;
     });
   };
