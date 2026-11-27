@@ -1196,7 +1196,7 @@ function paymentStateFromQuery() {
   const status = query.get('payment_status');
   return {
     search: query.get('payment_q') || '',
-    status: ['created', 'paid', 'failed', 'refunded'].includes(status) ? status : '',
+    status: ['paid', 'failed', 'refunded'].includes(status) ? status : '',
     page: Math.max(1, Number(query.get('payment_page')) || 1),
   };
 }
@@ -1291,14 +1291,13 @@ function paymentsMarkup({ summary, page, state, total }) {
       ${statCard('Collected', formatMoney(summary.paid_amount_paise))}
       ${statCard('Paid transactions', summary.paid)}
       ${statCard('Refunded', formatMoney(summary.refunded_amount_paise))}
-      ${statCard('Open attempts', summary.open)}
       ${statCard('Failed', summary.failed)}
     </section>
 
     <section class="admin-panel">
       <div class="results-heading">
         <h2>Transaction log</h2>
-        <span class="admin-note">${escapeHtml(String(summary.total))} attempt(s) recorded</span>
+        <span class="admin-note">${escapeHtml(String(summary.total))} transaction(s) recorded</span>
       </div>
 
       <form class="filters admin-filters" id="payment-filters" role="search">
@@ -1311,7 +1310,6 @@ function paymentsMarkup({ summary, page, state, total }) {
           <select name="status">
             <option value=""${state.status === '' ? ' selected' : ''}>All statuses</option>
             <option value="paid"${state.status === 'paid' ? ' selected' : ''}>Paid</option>
-            <option value="created"${state.status === 'created' ? ' selected' : ''}>Open</option>
             <option value="failed"${state.status === 'failed' ? ' selected' : ''}>Failed</option>
             <option value="refunded"${state.status === 'refunded' ? ' selected' : ''}>Refunded</option>
           </select>

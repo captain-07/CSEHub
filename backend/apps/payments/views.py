@@ -441,14 +441,23 @@ def _apply_event(event_type, payload):
 # These routes read the rows the checkout and webhook paths write. They are
 # deliberately read-only: `Purchase.status` is a settlement fact, and the Django
 # admin's editable field is the repair hatch for a webhook that never arrived.
+# Unfinished `created` (open) checkout attempts are excluded so abandoned
+# modals do not clutter the log.
+
+
+_TRACKED_LOG_STATUSES = frozenset({
+    Purchase.STATUS_PAID,
+    Purchase.STATUS_FAILED,
+    Purchase.STATUS_REFUNDED,
+})
 
 
 def _is_status(value):
-    return value in dict(Purchase.STATUS_CHOICES)
+    return value in _TRACKED_LOG_STATUSES
 
 
 class PurchaseLogListView(generics.ListAPIView):
-    """Every checkout attempt, for the admin's transaction log."""
+    """Settled and failed checkout attempts, for the admin's transaction log."""
 
     permission_classes = [IsAdminUser]
     serializer_class = PurchaseLogSerializer
@@ -456,16 +465,19 @@ class PurchaseLogListView(generics.ListAPIView):
     @extend_schema(
         summary='List payment transactions',
         description=(
-            'Admin only. `?status=` keeps one of `created`, `paid`, `failed` '
-            'or `refunded`; `?search=` matches the buyer, the article, either '
-            'provider id, the receipt or the contact number.'
+            'Admin only. Excludes open (`created`) attempts. `?status=` keeps '
+            'one of `paid`, `failed` or `refunded`; `?search=` matches the '
+            'buyer, the article, either provider id, the receipt or the contact '
+            'number.'
         ),
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        queryset = Purchase.objects.select_related('user', 'article')
+        queryset = Purchase.objects.select_related('user', 'article').exclude(
+            status=Purchase.STATUS_CREATED,
+        )
         status_filter = self.request.query_params.get('status', '').strip()
         if _is_status(status_filter):
             queryset = queryset.filter(status=status_filter)
@@ -498,7 +510,9 @@ class PurchaseSummaryView(APIView):
         description='Admin only. Counts and collected/refunded amounts in paise.',
     )
     def get(self, request):
-        totals = Purchase.objects.aggregate(
+        totals = Purchase.objects.exclude(
+            status=Purchase.STATUS_CREATED,
+        ).aggregate(
             total=Count('id'),
             paid=Count('id', filter=Q(status=Purchase.STATUS_PAID)),
             paid_amount_paise=Sum(
@@ -509,7 +523,6 @@ class PurchaseSummaryView(APIView):
                 'amount_paise', filter=Q(status=Purchase.STATUS_REFUNDED),
             ),
             failed=Count('id', filter=Q(status=Purchase.STATUS_FAILED)),
-            open=Count('id', filter=Q(status=Purchase.STATUS_CREATED)),
         )
         payload = {
             'total': totals['total'] or 0,
@@ -518,6 +531,5 @@ class PurchaseSummaryView(APIView):
             'refunded': totals['refunded'] or 0,
             'refunded_amount_paise': totals['refunded_amount_paise'] or 0,
             'failed': totals['failed'] or 0,
-            'open': totals['open'] or 0,
         }
         return Response(PurchaseSummarySerializer(payload).data)

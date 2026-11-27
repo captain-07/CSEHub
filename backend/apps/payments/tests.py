@@ -161,12 +161,14 @@ class PurchaseLogViewTests(TestCase):
             self.client.get('/api/payments/purchases/summary/').status_code, 403
         )
 
-    def test_the_log_lists_every_attempt_with_its_details(self):
+    def test_the_log_lists_tracked_attempts_with_their_details(self):
         self.client.force_authenticate(self.admin)
         response = self.client.get('/api/payments/purchases/')
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data['count'], 4)
+        self.assertEqual(response.data['count'], 3)
+        ids = {r['id'] for r in response.data['results']}
+        self.assertNotIn(self.open.pk, ids)
         row = next(r for r in response.data['results'] if r['id'] == self.paid.pk)
         self.assertEqual(row['user_email'], 'pay-reader@example.com')
         self.assertEqual(row['user_username'], 'pay-reader')
@@ -186,7 +188,7 @@ class PurchaseLogViewTests(TestCase):
     def test_the_log_is_newest_first(self):
         self.client.force_authenticate(self.admin)
         response = self.client.get('/api/payments/purchases/')
-        self.assertEqual(response.data['results'][0]['id'], self.open.pk)
+        self.assertEqual(response.data['results'][0]['id'], self.failed.pk)
 
     def test_status_filter_and_search(self):
         self.client.force_authenticate(self.admin)
@@ -195,9 +197,12 @@ class PurchaseLogViewTests(TestCase):
         self.assertEqual(paid.data['count'], 1)
         self.assertEqual(paid.data['results'][0]['id'], self.paid.pk)
 
-        # An unrecognised status is ignored rather than returning nothing.
+        # Open (`created`) and unrecognised statuses are ignored; open rows stay excluded.
+        created = self.client.get('/api/payments/purchases/', {'status': 'created'})
+        self.assertEqual(created.data['count'], 3)
+
         ignored = self.client.get('/api/payments/purchases/', {'status': 'nonsense'})
-        self.assertEqual(ignored.data['count'], 4)
+        self.assertEqual(ignored.data['count'], 3)
 
         by_order = self.client.get(
             '/api/payments/purchases/', {'search': 'order_refunded'}
@@ -208,12 +213,12 @@ class PurchaseLogViewTests(TestCase):
         by_article = self.client.get(
             '/api/payments/purchases/', {'search': 'sold-article'}
         )
-        self.assertEqual(by_article.data['count'], 4)
+        self.assertEqual(by_article.data['count'], 3)
 
         by_buyer = self.client.get(
             '/api/payments/purchases/', {'search': 'pay-reader@'}
         )
-        self.assertEqual(by_buyer.data['count'], 4)
+        self.assertEqual(by_buyer.data['count'], 3)
 
         by_receipt = self.client.get(
             '/api/payments/purchases/', {'search': 'receipt-failed'}
@@ -228,13 +233,13 @@ class PurchaseLogViewTests(TestCase):
         response = self.client.get('/api/payments/purchases/summary/')
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data['total'], 4)
+        self.assertEqual(response.data['total'], 3)
         self.assertEqual(response.data['paid'], 1)
         self.assertEqual(response.data['paid_amount_paise'], 14900)
         self.assertEqual(response.data['refunded'], 1)
         self.assertEqual(response.data['refunded_amount_paise'], 19900)
         self.assertEqual(response.data['failed'], 1)
-        self.assertEqual(response.data['open'], 1)
+        self.assertNotIn('open', response.data)
 
     def test_an_empty_log_summarises_to_zero(self):
         Purchase.objects.all().delete()

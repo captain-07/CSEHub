@@ -13,7 +13,7 @@ function toQuery(params = {}) {
 
 /**
  * Admin transaction log. `filters` accepts `status`
- * (`created`/`paid`/`failed`/`refunded`) and `search`.
+ * (`paid`/`failed`/`refunded`) and `search`.
  */
 export function getPurchases(filters, options) {
   return apiFetch(`/payments/purchases/${toQuery(filters)}`, options);

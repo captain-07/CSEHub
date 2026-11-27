@@ -131,5 +131,4 @@ class PurchaseSummarySerializer(serializers.Serializer):
     refunded = serializers.IntegerField()
     refunded_amount_paise = serializers.IntegerField()
     failed = serializers.IntegerField()
-    open = serializers.IntegerField()
 
