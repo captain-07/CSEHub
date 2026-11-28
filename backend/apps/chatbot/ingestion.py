@@ -1,13 +1,29 @@
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+import html
+import logging
+import re
+import time
+
+from django.conf import settings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pinecone import Pinecone
-from django.conf import settings
-import html
-import re
 
+logger = logging.getLogger(__name__)
 
 NAMESPACE = "articles"
+
+# ── Embedding rate-limit guard ───────────────────────────────────────────────
+# The free Gemini tier allows 100 embed_content requests per minute.
+# LangChain's GoogleGenerativeAIEmbeddings sends one request per text, so a
+# bulk add_texts call with more than ~90 chunks saturates the window.
+#
+# EMBED_BATCH_SIZE controls how many texts are embedded in one burst before
+# sleeping EMBED_BATCH_DELAY seconds.  Keeping the batch well under 100 leaves
+# headroom for the background worker's auto-reindex and for ad-hoc chat
+# retrievals that share the same API key.
+EMBED_BATCH_SIZE = getattr(settings, 'RAG_EMBED_BATCH_SIZE', 50)
+EMBED_BATCH_DELAY = getattr(settings, 'RAG_EMBED_BATCH_DELAY', 62)  # seconds
 
 
 def get_embeddings():
@@ -135,13 +151,16 @@ def remove_article_vectors(article_id) -> None:
 
 
 def ingest_article(article) -> int:
-
     """
     Splits an article into chunks, generates embeddings,
     and stores them in Pinecone.
 
     Existing vectors for the article are deleted first
     so the article can be safely re-ingested.
+
+    Chunks are embedded in batches of ``EMBED_BATCH_SIZE`` with a
+    ``EMBED_BATCH_DELAY``-second pause between batches so the free-tier
+    Gemini embedding quota (100 req/min) is not exceeded.
 
     Returns:
         Number of chunks stored.
@@ -199,14 +218,25 @@ def ingest_article(article) -> int:
         for i in range(len(chunks))
     ]
 
-    # Store chunks + embeddings in Pinecone
+    # Store chunks + embeddings in Pinecone, in rate-limited batches.
     vectorstore = get_vectorstore()
+    total = len(chunks)
 
-    vectorstore.add_texts(
-        texts=chunks,
-        metadatas=metadatas,
-        ids=ids,
-        namespace=NAMESPACE,
-    )
+    for start in range(0, total, EMBED_BATCH_SIZE):
+        end = min(start + EMBED_BATCH_SIZE, total)
+        vectorstore.add_texts(
+            texts=chunks[start:end],
+            metadatas=metadatas[start:end],
+            ids=ids[start:end],
+            namespace=NAMESPACE,
+        )
+        # Sleep between batches to stay under the quota window.
+        # Skip the delay after the last batch — there is nothing to wait for.
+        if end < total:
+            logger.info(
+                'Embedded chunks %d–%d of %d for "%s"; pausing %ds for rate limit…',
+                start + 1, end, total, article.slug, EMBED_BATCH_DELAY,
+            )
+            time.sleep(EMBED_BATCH_DELAY)
 
-    return len(chunks)
+    return total

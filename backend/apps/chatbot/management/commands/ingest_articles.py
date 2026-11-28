@@ -1,6 +1,9 @@
+import time
+
 from django.core.management.base import BaseCommand, CommandError
+
 from apps.articles.models import Article
-from apps.chatbot.ingestion import ingest_article, purge_namespace
+from apps.chatbot.ingestion import ingest_article, purge_namespace, EMBED_BATCH_DELAY
 
 
 class Command(BaseCommand):
@@ -49,14 +52,24 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('No published articles found.'))
             return
 
+        article_list = list(articles)
         failures = []
-        for article in articles:
+        for i, article in enumerate(article_list):
             try:
                 count = ingest_article(article)
                 self.stdout.write(f'  {article.slug} — {count} chunks')
             except Exception as e:
                 failures.append(article.slug)
                 self.stdout.write(self.style.ERROR(f'  FAILED {article.slug}: {e}'))
+
+            # Pause between articles so the next article's first batch does not
+            # land inside the same rate-limit window as the previous article's
+            # last batch.  Skip the delay after the final article.
+            if i < len(article_list) - 1:
+                self.stdout.write(
+                    self.style.WARNING(f'  ⏳ Waiting {EMBED_BATCH_DELAY}s for rate-limit cooldown…')
+                )
+                time.sleep(EMBED_BATCH_DELAY)
 
         if failures:
             raise CommandError(f'Ingestion failed for: {", ".join(failures)}')
